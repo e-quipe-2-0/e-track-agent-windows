@@ -82,7 +82,7 @@ public sealed class TrayApp : ApplicationContext
         else if (!_model.Sync.HasToken)
         {
             _tray.ShowBalloonTip(8000, AppIdentity.DisplayName,
-                "Non collegato a equipe-track: apri le Impostazioni dall'icona per inserire server e token.", ToolTipIcon.Info);
+                "Non collegato a equipe-track: apri le Impostazioni dall'icona per inserire il codice di collegamento.", ToolTipIcon.Info);
         }
     }
 

@@ -26,7 +26,7 @@ Istruzioni per chi installa: [installer/LEGGIMI.txt](installer/LEGGIMI.txt) (cop
 | Dominio della scheda del browser | UI Automation (COM, parte di Windows) letta da .NET senza dipendenze | Estensioni del browser: andrebbero installate e mantenute per ogni browser |
 | Credenziali sicure | Gestione credenziali di Windows (`CredWriteW`/`CredReadW`, cifrate con DPAPI sul profilo) | File cifrati a mano |
 | Icona nella tray, report, Impostazioni | WinForms: `NotifyIcon` e controlli nativi, nessun runtime grafico da distribuire | WPF/WinUI: più pesanti per due finestre di servizio |
-| **Logica identica al Mac** | Il Core (motore, regole, report, storage, sync) è C# puro `net10.0`, **verificato su macOS/Linux** con gli stessi casi dei check Swift (274 verifiche, server equipe-track finto incluso) | — |
+| **Logica identica al Mac** | Il Core (motore, regole, report, storage, sync) è C# puro `net10.0`, **verificato su macOS/Linux** con gli stessi casi dei check Swift (273 verifiche, server equipe-track finto incluso) | — |
 | Distribuzione | `dotnet publish` autosufficiente: **un solo .exe** col runtime dentro, niente da preinstallare; installer NSIS per utente, senza amministratore | MSI/WiX: richiede Windows per compilare; .NET Framework 4.8: preinstallato ma API vecchie e niente test sul Mac |
 
 Il prezzo è la dimensione: il runtime .NET e la proiezione WinRT stanno dentro l'eseguibile (~54 MB, installer ~48 MB).
@@ -92,9 +92,11 @@ l'amministratore.
 
 Identico al Mac ([docs/EQUIPE-TRACK.md](../activity-tracker/docs/EQUIPE-TRACK.md) dell'agente Mac):
 
-- **Impostazioni → equipe-track**: URL del server, token dell'agente (`npm run agente:token -- "Nome"` in equipe-track),
-  segreto del gate (`ACCESS_SECRET`). Tutti in **Gestione credenziali di Windows** (`it.equipe.activitytracker.equipe-track/…`),
-  mai su file né nel codice. `http://` solo per `localhost`/`127.0.0.1` e solo con `AT_ALLOW_INSECURE_LOCALHOST=1`.
+- **Impostazioni → equipe-track**: solo il codice di collegamento (token dell'agente, `npm run agente:token -- "Nome"` in
+  equipe-track); il server `https://equipetrack.e-quipe.com` è incorporato (`SyncClient.DefaultServerUrl`), per i test lo
+  sostituisce `AT_SERVER_URL`. URL e token in **Gestione credenziali di Windows** (`it.equipe.activitytracker.equipe-track/…`),
+  mai su file né nel codice; la vecchia voce `gate-secret` si toglie a ogni salvataggio. `http://` solo per
+  `localhost`/`127.0.0.1` e solo con `AT_ALLOW_INSECURE_LOCALHOST=1`.
 - **Quando**: si traccia solo se `GET /api/agente/sessione` (ogni 60 s, alla ripresa dalla sospensione e allo sblocco)
   dice sessione aperta e non in pausa. In pausa non si traccia. Fuori sessione app, dominio e titolo non arrivano
   nemmeno sul disco locale (il cancello `SessionGate` li toglie prima del database).
@@ -103,7 +105,8 @@ Identico al Mac ([docs/EQUIPE-TRACK.md](../activity-tracker/docs/EQUIPE-TRACK.md
   i quattro stati `attivo`, `passivo`, `senza_utilizzo`, `fuori_sessione`; mai URL, titoli di finestra o eseguibili.
   I nomi passano dal filtro che rifiuta `/ ? @ ://` (lo stesso del server).
 - **Spegnimento, riavvio, disconnessione** (`WM_ENDSESSION`): ultimo invio e `POST /api/agente/stop`.
-- Intestazioni: `Authorization: Bearer <token>`, `Cookie: et_gate=<ACCESS_SECRET>`, `X-Agente-Versione: 0.3.0-windows`.
+- Intestazioni: `Authorization: Bearer <token>`, `X-Agente-Versione: 0.3.0-windows`, nessun cookie: il proxy di perimetro
+  lascia passare l'agente col solo token.
 
 ### Prova del giro vero in locale
 
@@ -111,10 +114,13 @@ Identico al Mac ([docs/EQUIPE-TRACK.md](../activity-tracker/docs/EQUIPE-TRACK.md
    oppure dal Mac con un tunnel (`ssh -R 3000:localhost:3000 utente@pc-windows`, o dal PC `ssh -L 3000:localhost:3000 mac`).
 2. Chiudere l'agente installato (icona → Esci), poi in PowerShell:
    ```powershell
-   $env:AT_ALLOW_INSECURE_LOCALHOST = "1"; $env:AT_STOP_ON_QUIT = "1"; $env:AT_DB_PATH = "$env:TEMP\at-prova.sqlite"
+   $env:AT_SERVER_URL = "http://localhost:3000"; $env:AT_ALLOW_INSECURE_LOCALHOST = "1"
+   $env:AT_STOP_ON_QUIT = "1"; $env:AT_DB_PATH = "$env:TEMP\at-prova.sqlite"
    & "$env:LOCALAPPDATA\Programs\activity-tracker\activity-tracker.exe"
    ```
-3. Impostazioni → equipe-track: `http://localhost:3000`, il token, `ACCESS_SECRET` → «Salva nelle credenziali di Windows».
+3. Impostazioni → equipe-track: il token come codice di collegamento → «Salva nelle credenziali di Windows» (sotto lo
+   stato compare `http://localhost:3000`). Finita la prova, «Scollega»: altrimenti le credenziali di localhost restano
+   salvate anche senza `AT_SERVER_URL`.
    Da qui i passi 5–9 della prova Mac sono identici; i log sono in `%LOCALAPPDATA%\activity-tracker\agent.log`.
 
 ## Variabili d'ambiente (prove)
@@ -122,6 +128,7 @@ Identico al Mac ([docs/EQUIPE-TRACK.md](../activity-tracker/docs/EQUIPE-TRACK.md
 - `AT_NO_LOGIN_ITEM=1`: non registra l'avvio all'accesso al primo avvio.
 - `AT_NO_BROWSER_URL=1` (o `AT_NO_APPLE_EVENTS=1`, come sul Mac): non legge la barra degli indirizzi.
 - `AT_DB_PATH=C:\percorso\file.sqlite`: usa un altro database.
+- `AT_SERVER_URL=https://…`: si collega a questo server invece di quello incorporato (solo prove).
 - `AT_ALLOW_INSECURE_LOCALHOST=1`: ammette `http://127.0.0.1` / `http://localhost` (solo prove locali).
 - `AT_STOP_ON_QUIT=1`: anche «Esci» chiude la sessione su equipe-track, come lo spegnimento.
 

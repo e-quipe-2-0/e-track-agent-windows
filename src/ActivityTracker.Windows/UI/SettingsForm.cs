@@ -5,9 +5,9 @@ using Timer = System.Windows.Forms.Timer;
 namespace ActivityTracker.Windows.UI;
 
 /// <summary>
-/// Impostazioni, le stesse sezioni del Mac: soglia, avvio all'accesso, collegamento a equipe-track (server, token,
-/// segreto del gate, salvati in Gestione credenziali), regole attività, esclusioni video, segnali, cartella dati.
-/// Token e segreto restano nei campi solo fino al salvataggio, poi i campi si svuotano.
+/// Impostazioni, le stesse sezioni del Mac: soglia, avvio all'accesso, collegamento a equipe-track (solo il codice di
+/// collegamento: il server è incorporato; salvati in Gestione credenziali), regole attività, esclusioni video, segnali,
+/// cartella dati. Il codice resta nel campo solo fino al salvataggio, poi il campo si svuota.
 ///
 /// Impaginazione: sezioni di larghezza fissa una sotto l'altra in un pannello che scorre; dentro ogni sezione una
 /// griglia a una colonna, i campi si allargano per ancoraggio. Misure in pixel logici, scalate con <see cref="S"/>.
@@ -26,9 +26,7 @@ public sealed class SettingsForm : Form
 
     private readonly Label _syncStatus = new() { AutoSize = true, Font = Fonts.BodyStrong, UseMnemonic = false };
     private readonly Label _syncDetail;
-    private readonly TextBox _server = new() { PlaceholderText = "https://track.esempio.it" };
     private readonly TextBox _token = new() { UseSystemPasswordChar = true };
-    private readonly TextBox _gate = new() { UseSystemPasswordChar = true };
     private readonly Button _save = new() { Text = "Salva nelle credenziali di Windows", AutoSize = true };
     private readonly Button _sendNow = new() { Text = "Invia ora", AutoSize = true };
     private readonly Button _disconnect = new() { Text = "Scollega", AutoSize = true };
@@ -124,10 +122,9 @@ public sealed class SettingsForm : Form
         };
         _disconnect.Click += (_, _) =>
         {
-            if (MessageBox.Show(this, "Togliere server, token e segreto da questo PC? L'agente smette di tracciare.", Text,
+            if (MessageBox.Show(this, "Togliere il codice di collegamento da questo PC? L'agente smette di tracciare.", Text,
                                 MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             _model.Sync.Disconnect();
-            _server.Text = "";
             RefreshSync();
         };
 
@@ -143,15 +140,12 @@ public sealed class SettingsForm : Form
             field.Margin = Pad(0, 3, 0, 3);
             grid.Controls.Add(field, 1, r);
         }
-        Field("Server", _server);
-        Field("Token agente", _token);
-        Field("Segreto gate", _gate);
-        _gate.KeyDown += (_, e) =>
+        Field("Codice di collegamento", _token);
+        _token.KeyDown += (_, e) =>
         {
             if (e.KeyCode == Keys.Enter) Save();
         };
         _save.Click += (_, _) => Save();
-        _server.TextChanged += (_, _) => UpdateSaveEnabled();
         _token.TextChanged += (_, _) => UpdateSaveEnabled();
         _save.Anchor = AnchorStyles.Right;
         _save.Margin = Pad(0, 6, 0, 0);
@@ -256,7 +250,6 @@ public sealed class SettingsForm : Form
         _login.Checked = LoginItem.IsEnabled;
         _loginStatus.Text = _model.LoginStatus;
         _exclusions.Lines = _model.VideoExclusions.ToArray();
-        _server.Text = _model.Sync.ServerUrl;
         _loading = false;
         LoadRules();
         RefreshLive();
@@ -277,7 +270,6 @@ public sealed class SettingsForm : Form
         {
             e.Cancel = true;
             _token.Text = "";
-            _gate.Text = "";
             _refresh.Stop();
             Hide();
             return;
@@ -304,22 +296,19 @@ public sealed class SettingsForm : Form
         _sendNow.Visible = sync.HasToken;
         _sendNow.Enabled = !sync.IsBusy;
         _disconnect.Visible = sync.HasToken;
-        _token.PlaceholderText = sync.HasToken ? "salvato in Gestione credenziali (vuoto = non cambiarlo)" : "da npm run agente:token";
-        _gate.PlaceholderText = sync.HasGateSecret ? "salvato in Gestione credenziali (vuoto = non cambiarlo)" : "ACCESS_SECRET (cookie et_gate), se te l'hanno dato";
+        _token.PlaceholderText = sync.HasToken ? "salvato in Gestione credenziali (incollane uno nuovo per sostituirlo)" : "fornito da chi gestisce equipe-track";
         _syncError.Text = sync.LastError ?? "";
         _syncError.Visible = sync.LastError is not null;
         UpdateSaveEnabled();
     }
 
-    private void UpdateSaveEnabled() =>
-        _save.Enabled = _server.Text.Trim().Length > 0 && (_model.Sync.HasToken || _token.Text.Length > 0);
+    private void UpdateSaveEnabled() => _save.Enabled = _token.Text.Trim().Length > 0;
 
     private void Save()
     {
         if (!_save.Enabled) return;
-        if (_model.Sync.SaveCredentials(_server.Text, _token.Text, _gate.Text)) _server.Text = _model.Sync.ServerUrl;
+        _model.Sync.SaveCredentials(_token.Text);
         _token.Text = "";
-        _gate.Text = "";
         RefreshSync();
     }
 

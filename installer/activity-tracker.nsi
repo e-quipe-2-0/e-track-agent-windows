@@ -59,7 +59,7 @@ VIAddVersionKey /LANG=1040 "LegalCopyright" "${PUBLISHER}"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_TITLE "${PRODUCT_NAME} è installato"
-!define MUI_FINISHPAGE_TEXT "L'icona compare nella barra delle applicazioni, vicino all'orologio (se non la vedi, apri la freccia ^ delle icone nascoste).$\r$\n$\r$\nAl primo avvio si aprono le Impostazioni: inserisci l'indirizzo del server e il token che ti ha dato chi gestisce equipe-track."
+!define MUI_FINISHPAGE_TEXT "L'icona compare nella barra delle applicazioni, vicino all'orologio (se non la vedi, apri la freccia ^ delle icone nascoste).$\r$\n$\r$\nAl primo avvio si aprono le Impostazioni: inserisci il codice di collegamento che ti ha dato chi gestisce equipe-track."
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${APP_EXE}"
 !define MUI_FINISHPAGE_RUN_TEXT "Avvia ${PRODUCT_NAME} adesso"
 !define MUI_FINISHPAGE_SHOWREADME "$INSTDIR\LEGGIMI.txt"
@@ -114,7 +114,7 @@ SectionEnd
 Section "Uninstall"
   !insertmacro StopRunningAgent
 
-  MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Eliminare anche i dati misurati su questo PC e il collegamento a equipe-track (server, token, segreto)?$\r$\n$\r$\nI dati già inviati a equipe-track restano su equipe-track." /SD IDNO IDNO keep_data
+  MessageBox MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2 "Eliminare anche i dati misurati su questo PC e il collegamento a equipe-track (codice di collegamento)?$\r$\n$\r$\nI dati già inviati a equipe-track restano su equipe-track." /SD IDNO IDNO keep_data
     ExecWait '"$INSTDIR\${APP_EXE}" --forget-credentials'
     RMDir /r "$LOCALAPPDATA\${APP_NAME}"
   keep_data:

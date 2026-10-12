@@ -12,7 +12,8 @@ public enum SyncErrorKind
     InvalidUrl,
     /// <summary>401 dalla rotta: token mancante, sbagliato o revocato, o persona disattivata.</summary>
     Unauthorized,
-    /// <summary>401 dal gate di perimetro: cookie <c>et_gate</c> assente o diverso da <c>ACCESS_SECRET</c>.</summary>
+    /// <summary>401 dal proxy di perimetro, non dalla rotta: risposta senza <c>WWW-Authenticate: Bearer</c>. Il proxy
+    /// lascia passare le richieste col token Bearer, quindi è un'anomalia lato server: si ritenta.</summary>
     Gate,
     Forbidden,
     /// <summary>400 / 404 / 413: richiesta rifiutata dal server, con il messaggio del server.</summary>
@@ -31,8 +32,8 @@ public enum SyncErrorKind
 /// <summary>Errore del client verso equipe-track, confrontabile per valore.</summary>
 public sealed record SyncFault(SyncErrorKind Kind, string? Detail = null, int? Index = null, int? Status = null)
 {
-    /// <summary>True per gli errori transitori (rete, 5xx, 429): si ritenta al giro successivo.</summary>
-    public bool IsRetryable => Kind is SyncErrorKind.Network or SyncErrorKind.Server or SyncErrorKind.RateLimited;
+    /// <summary>True per gli errori transitori (rete, 5xx, 429, 401 del proxy): si ritenta al giro successivo.</summary>
+    public bool IsRetryable => Kind is SyncErrorKind.Network or SyncErrorKind.Server or SyncErrorKind.RateLimited or SyncErrorKind.Gate;
 }
 
 public sealed class SyncException(SyncFault fault) : Exception(fault.Detail ?? fault.Kind.ToString())
@@ -46,8 +47,7 @@ public interface IHttpTransport
     Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken = default);
 }
 
-/// <summary>Trasporto reale (timeout 20 s per richiesta, nessun cookie salvato: il cookie del gate viaggia solo come
-/// intestazione esplicita).</summary>
+/// <summary>Trasporto reale (timeout 20 s per richiesta, nessun cookie salvato né inviato).</summary>
 public sealed class HttpClientTransport : IHttpTransport
 {
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(20);
@@ -77,30 +77,42 @@ public sealed class HttpClientTransport : IHttpTransport
 ///   POST /api/agente/segmenti   i tratti di una giornata (sostituisce la giornata)
 ///   POST /api/agente/stop       chiude la sessione aperta
 /// </code>
-/// Ogni richiesta porta <c>Authorization: Bearer &lt;token&gt;</c> e il cookie <c>et_gate=&lt;ACCESS_SECRET&gt;</c>.
-/// Token e segreto non vengono mai scritti nei log.
+/// Ogni richiesta porta <c>Authorization: Bearer &lt;token&gt;</c>: il proxy di perimetro lascia passare l'agente col solo
+/// token. Il token non viene mai scritto nei log.
 /// </summary>
 public sealed class SyncClient
 {
-    public const string GateCookieName = "et_gate";
     public const string VersionHeader = "X-Agente-Versione";
     public const string InsecureLocalhostFlag = "AT_ALLOW_INSECURE_LOCALHOST";
 
     public Uri BaseUrl { get; }
     public string Token { get; }
-    /// <summary>Valore del cookie del gate; null o vuoto = nessun cookie.</summary>
-    public string? GateSecret { get; }
     public string AgentVersion { get; }
     public IHttpTransport Transport { get; }
 
-    public SyncClient(Uri baseUrl, string token, string? gateSecret, string agentVersion = AppIdentity.AgentVersion,
-                      IHttpTransport? transport = null)
+    public SyncClient(Uri baseUrl, string token, string agentVersion = AppIdentity.AgentVersion, IHttpTransport? transport = null)
     {
         BaseUrl = baseUrl;
         Token = token;
-        GateSecret = gateSecret;
         AgentVersion = agentVersion;
         Transport = transport ?? new HttpClientTransport();
+    }
+
+    // Indirizzo del server
+
+    /// <summary>Il server di equipe-track, incorporato: l'utente inserisce solo il codice di collegamento.</summary>
+    public const string DefaultServerUrl = "https://equipetrack.e-quipe.com";
+    /// <summary>Variabile d'ambiente che sostituisce <see cref="DefaultServerUrl"/> (solo per i test, es.
+    /// <c>http://localhost:3000</c> insieme a <c>AT_ALLOW_INSECURE_LOCALHOST=1</c>).</summary>
+    public const string ServerUrlVariable = "AT_SERVER_URL";
+
+    /// <summary>L'indirizzo a cui collegarsi: <c>AT_SERVER_URL</c> nell'ambiente dato (default: quello del processo) se
+    /// non vuoto, altrimenti <see cref="DefaultServerUrl"/>.</summary>
+    public static string EnvironmentServerUrl(IDictionary<string, string>? env = null)
+    {
+        var v = env is null ? Environment.GetEnvironmentVariable(ServerUrlVariable)
+                            : env.TryGetValue(ServerUrlVariable, out var x) ? x : null;
+        return string.IsNullOrWhiteSpace(v) ? DefaultServerUrl : v.Trim();
     }
 
     // Validazione
@@ -155,10 +167,6 @@ public sealed class SyncClient
         return t.Length is >= 20 and <= 200 && t.All(c => c is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '_' or '-');
     }
 
-    /// <summary>Il segreto nel cookie, codificato come lo decodifica Next (<c>decodeURIComponent</c>): solo
-    /// <c>A–Z a–z 0–9 - . _ ~</c> restano in chiaro, il resto in <c>%XX</c>.</summary>
-    public static string GateCookieValue(string secret) => Uri.EscapeDataString(secret);
-
     // Le tre rotte
 
     /// <summary><c>GET /api/agente/sessione</c>, con gli istanti di invio e di ricezione (per lo scarto d'orologio).</summary>
@@ -192,8 +200,6 @@ public sealed class SyncClient
         var request = new HttpRequestMessage(method, new Uri(Text(BaseUrl) + path));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + Token.Trim());
-        if (!string.IsNullOrEmpty(GateSecret))
-            request.Headers.TryAddWithoutValidation("Cookie", $"{GateCookieName}={GateCookieValue(GateSecret)}");
         request.Headers.TryAddWithoutValidation(VersionHeader, AgentVersion);
         if (body is not null)
         {
@@ -229,7 +235,7 @@ public sealed class SyncClient
                     try { return SyncJson.Decode<T>(data); }
                     catch (Exception) { throw new SyncException(new SyncFault(SyncErrorKind.Decoding)); }
                 case 401:
-                    // La rotta risponde JSON con `WWW-Authenticate: Bearer`; il gate risponde testo semplice.
+                    // La rotta risponde JSON con `WWW-Authenticate: Bearer`; il proxy di perimetro risponde testo semplice.
                     var bearer = response.Headers.TryGetValues("WWW-Authenticate", out var values)
                         && values.Any(v => v.TrimStart().StartsWith("bearer", StringComparison.OrdinalIgnoreCase));
                     throw new SyncException(new SyncFault(bearer ? SyncErrorKind.Unauthorized : SyncErrorKind.Gate));

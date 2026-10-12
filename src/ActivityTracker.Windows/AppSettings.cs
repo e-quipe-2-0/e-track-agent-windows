@@ -6,7 +6,7 @@ namespace ActivityTracker.Windows;
 
 /// <summary>
 /// Preferenze persistenti (<c>%LOCALAPPDATA%\activity-tracker\settings.json</c>; il Mac usa UserDefaults) e variabili
-/// d'ambiente di controllo. Qui non c'è nessun segreto: URL, token e segreto del gate stanno in Gestione credenziali.
+/// d'ambiente di controllo. Qui non c'è nessun segreto: URL del server e token stanno in Gestione credenziali.
 /// </summary>
 public sealed class AppSettings
 {

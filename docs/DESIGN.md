@@ -17,7 +17,7 @@ Swift, verificata con gli stessi casi dei check Swift).
 | SQLite: tabelle, colonne, migrazioni (`grdb_migrations`) | `Store.swift` (GRDB) | `Store.cs` (Microsoft.Data.Sqlite) |
 | Registro delle sessioni, finestre di contenuto, troncamenti | `TrackingLedger.swift`, `TrackingSync.swift` | idem `.cs` |
 | Tratti, hash, filtro privacy dei nomi, 422 con indice | `SyncPayloadBuilder.swift` | `SyncPayloadBuilder.cs` (+ `PrivacyFilter` = `motivoNomeRifiutato`) |
-| Client: 3 rotte, Bearer, cookie `et_gate`, 401 rotta/gate | `SyncClient.swift` | `SyncClient.cs` |
+| Client: 3 rotte, Bearer (nessun cookie), server incorporato, 401 rotta/proxy | `SyncClient.swift` | `SyncClient.cs` |
 | Servizio di sync: 60 s / 5 min / ripresa / sblocco / spegnimento (8 s) | `SyncService.swift` | `Sync/SyncService.cs` |
 
 Le uniche costanti diverse: le regole «app» del seed usano l'eseguibile (`zoom.exe`, `ms-teams.exe`, `teams.exe`)

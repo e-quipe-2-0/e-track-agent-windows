@@ -32,7 +32,6 @@ public sealed class SyncService
         Paused,
         NoSession,
         TokenRejected,
-        GateRejected,
     }
 
     public const int PollIntervalMs = 60_000;
@@ -43,8 +42,8 @@ public sealed class SyncService
     public static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(8);
 
     public Link State { get; private set; } = Link.NotConfigured;
-    public string ServerUrl { get; private set; } = "";
-    public bool HasGateSecret { get; private set; }
+    /// <summary>Il server delle credenziali salvate; senza credenziali, quello a cui ci si collegherà.</summary>
+    public string ServerUrl { get; private set; }
     public string? SessionGiorno { get; private set; }
     public DateTimeOffset? LastSendAt { get; private set; }
     public string? LastError { get; private set; }
@@ -57,6 +56,8 @@ public sealed class SyncService
     private readonly ITokenStore _secrets;
     private readonly IHttpTransport _transport;
     private readonly bool _allowInsecureLocalhost;
+    /// <summary>Dove si collegano le credenziali nuove: il server incorporato, o <c>AT_SERVER_URL</c> nei test.</summary>
+    private readonly string _connectUrl;
 
     private EquipeCredentials? _credentials;
     private TrackingSync? _core;
@@ -67,12 +68,15 @@ public sealed class SyncService
     private bool _started;
     private bool _shutDown;
 
-    public SyncService(ISyncDataSource source, ITokenStore secrets, IHttpTransport? transport = null, bool? allowInsecureLocalhost = null)
+    public SyncService(ISyncDataSource source, ITokenStore secrets, IHttpTransport? transport = null, bool? allowInsecureLocalhost = null,
+                       string? connectUrl = null)
     {
         _source = source;
         _secrets = secrets;
         _transport = transport ?? new HttpClientTransport();
         _allowInsecureLocalhost = allowInsecureLocalhost ?? SyncClient.EnvironmentAllowsInsecureLocalhost();
+        _connectUrl = connectUrl ?? SyncClient.EnvironmentServerUrl();
+        ServerUrl = _connectUrl;
     }
 
     // Ciclo di vita
@@ -99,8 +103,7 @@ public sealed class SyncService
         {
             LastError = "Gestione credenziali: " + e.Message;
         }
-        ServerUrl = _credentials?.ServerUrl ?? "";
-        HasGateSecret = !string.IsNullOrEmpty(_credentials?.GateSecret);
+        ServerUrl = _credentials?.ServerUrl ?? _connectUrl;
         RefreshGate();
         if (_credentials is null)
         {
@@ -121,11 +124,12 @@ public sealed class SyncService
 
     public bool HasToken => _credentials is not null;
 
-    /// <summary>Salva le credenziali. Token o segreto vuoti = si tiene quello già salvato. Un URL o un token diversi da
-    /// prima ricominciano da zero (registro ed esiti dimenticati: potrebbe essere un'altra persona).</summary>
-    public bool SaveCredentials(string rawUrl, string rawToken, string rawSecret)
+    /// <summary>Salva in Gestione credenziali il codice di collegamento, abbinato al server incorporato. Codice vuoto = si
+    /// tiene quello già salvato. Un URL o un token diversi da prima ricominciano da zero (registro ed esiti dimenticati:
+    /// potrebbe essere un'altra persona).</summary>
+    public bool SaveCredentials(string rawToken)
     {
-        var (url, error) = SyncClient.Validate(rawUrl, _allowInsecureLocalhost);
+        var (url, error) = SyncClient.Validate(_connectUrl, _allowInsecureLocalhost);
         if (url is null)
         {
             LastError = Message(error!);
@@ -136,18 +140,17 @@ public sealed class SyncService
         var newToken = token.Length == 0 ? _credentials?.Token ?? "" : token;
         if (newToken.Length == 0)
         {
-            LastError = "Inserisci il token dell'agente";
+            LastError = "Inserisci il codice di collegamento";
             Notify();
             return false;
         }
         if (!SyncClient.IsWellFormedToken(newToken))
         {
-            LastError = "Token non valido: 20–200 caratteri fra lettere, cifre, «-» e «_»";
+            LastError = "Codice di collegamento non valido: 20–200 caratteri fra lettere, cifre, «-» e «_»";
             Notify();
             return false;
         }
-        var secret = rawSecret.Trim();
-        var updated = new EquipeCredentials(SyncClient.Text(url), newToken, secret.Length == 0 ? _credentials?.GateSecret ?? "" : secret);
+        var updated = new EquipeCredentials(SyncClient.Text(url), newToken);
         var identityChanged = _credentials?.ServerUrl != updated.ServerUrl || _credentials?.Token != updated.Token;
         try
         {
@@ -161,7 +164,6 @@ public sealed class SyncService
         }
         _credentials = updated;
         ServerUrl = updated.ServerUrl;
-        HasGateSecret = updated.GateSecret.Length > 0;
         LastError = null;
         if (identityChanged)
         {
@@ -185,8 +187,7 @@ public sealed class SyncService
         try { EquipeCredentials.Delete(_secrets); } catch (Exception e) { Log.Write("[Sync] rimozione delle credenziali fallita: " + e.Message); }
         try { _core?.Reset(); } catch (Exception e) { Log.Write("[Sync] azzeramento del registro fallito: " + e.Message); }
         _credentials = null;
-        ServerUrl = "";
-        HasGateSecret = false;
+        ServerUrl = _connectUrl;
         SessionGiorno = null;
         LastSendAt = null;
         LastError = null;
@@ -207,8 +208,7 @@ public sealed class SyncService
         Link.Tracking => "Sessione aperta: traccia",
         Link.Paused => "Sessione in pausa: non traccia",
         Link.NoSession => "Nessuna sessione aperta: non traccia",
-        Link.TokenRejected => "Token rifiutato: non traccia",
-        _ => "Segreto del gate rifiutato: non traccia",
+        _ => "Codice di collegamento rifiutato: non traccia",
     };
 
     public string LastSendText => LastSendAt is { } t ? "Ultimo invio: " + TimeText(t) : "Ultimo invio: mai";
@@ -220,12 +220,12 @@ public sealed class SyncService
         {
             var s = "equipe-track: " + char.ToLowerInvariant(StatusText[0]) + StatusText[1..];
             if (State == Link.Tracking && LastSendAt is { } t) s += " · ultimo invio " + TimeText(t);
-            if (LastError is { } e && State != Link.TokenRejected && State != Link.GateRejected) s += " · " + e;
+            if (LastError is { } e && State != Link.TokenRejected) s += " · " + e;
             return s;
         }
     }
 
-    public bool NeedsAttention => State is Link.TokenRejected or Link.GateRejected || (State != Link.NotConfigured && LastError is not null);
+    public bool NeedsAttention => State == Link.TokenRejected || (State != Link.NotConfigured && LastError is not null);
 
     // Pianificazione
 
@@ -266,7 +266,7 @@ public sealed class SyncService
 
     private async void RequestCycle(bool send)
     {
-        if (_shutDown || _credentials is null || _core is null || State is Link.TokenRejected or Link.GateRejected) return;
+        if (_shutDown || _credentials is null || _core is null || State == Link.TokenRejected) return;
         if (IsBusy)
         {
             _queuedCycle = true;
@@ -316,7 +316,7 @@ public sealed class SyncService
             Handle(e);
         }
         RefreshGate();
-        if (!mustSend || State is Link.TokenRejected or Link.GateRejected) return;
+        if (!mustSend || State == Link.TokenRejected) return;
         await SendPending(client, core);
     }
 
@@ -377,7 +377,7 @@ public sealed class SyncService
         if (_shutDown) return;
         _shutDown = true;
         StopTimers();
-        if (MakeClient() is not { } client || _core is not { } core || State is Link.TokenRejected or Link.GateRejected) return;
+        if (MakeClient() is not { } client || _core is not { } core || State == Link.TokenRejected) return;
         var now = DateTimeOffset.UtcNow;
         var state = core.CurrentState(now);
         if (state is not null)
@@ -430,16 +430,10 @@ public sealed class SyncService
             LastError = error.Message;
             return;
         }
-        switch (fault.Kind)
+        if (fault.Kind == SyncErrorKind.Unauthorized)
         {
-            case SyncErrorKind.Unauthorized:
-                State = Link.TokenRejected;
-                StopTimers();
-                break;
-            case SyncErrorKind.Gate:
-                State = Link.GateRejected;
-                StopTimers();
-                break;
+            State = Link.TokenRejected;
+            StopTimers();
         }
         LastError = Message(fault);
         Log.Write("[Sync] errore: " + LastError);
@@ -448,7 +442,7 @@ public sealed class SyncService
     /// <summary>Cancello e stato visibile dall'ultima lettura: senza una lettura recente il contenuto non si conserva.</summary>
     private void RefreshGate()
     {
-        var rejected = State is Link.TokenRejected or Link.GateRejected;
+        var rejected = State == Link.TokenRejected;
         _source.SyncGate.Windows = _credentials is not null && !rejected ? _core?.ContentWindows(DateTimeOffset.UtcNow) ?? [] : [];
         if (_credentials is null)
         {
@@ -476,7 +470,7 @@ public sealed class SyncService
     private SyncClient? MakeClient()
     {
         if (_credentials is not { } c || SyncClient.Validate(c.ServerUrl, _allowInsecureLocalhost).Url is not { } url) return null;
-        return new SyncClient(url, c.Token, c.GateSecret.Length == 0 ? null : c.GateSecret, AppIdentity.AgentVersion, _transport);
+        return new SyncClient(url, c.Token, AppIdentity.AgentVersion, _transport);
     }
 
     private void Notify() => Changed?.Invoke();
@@ -485,8 +479,8 @@ public sealed class SyncService
     {
         SyncErrorKind.InsecureUrl => "URL non sicuro: serve https:// (http solo per localhost con AT_ALLOW_INSECURE_LOCALHOST=1)",
         SyncErrorKind.InvalidUrl => "URL del server non valido",
-        SyncErrorKind.Unauthorized => "Token rifiutato da equipe-track: emettine uno nuovo (npm run agente:token) e salvalo qui",
-        SyncErrorKind.Gate => "Il gate di equipe-track ha rifiutato la richiesta: controlla il segreto (ACCESS_SECRET)",
+        SyncErrorKind.Unauthorized => "Codice di collegamento rifiutato da equipe-track: chiedine uno nuovo e salvalo qui",
+        SyncErrorKind.Gate => "equipe-track ha bloccato la richiesta (401): si riprova al prossimo giro",
         SyncErrorKind.Forbidden => "Operazione non consentita (403)",
         SyncErrorKind.BadRequest or SyncErrorKind.Unprocessable => "Richiesta rifiutata dal server: " + e.Detail,
         SyncErrorKind.RateLimited => "Server occupato (429)",

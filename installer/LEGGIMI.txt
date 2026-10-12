@@ -47,22 +47,18 @@ in quel caso rivolgiti a chi gestisce i PC.
 3. COLLEGAMENTO A EQUIPE-TRACK
 ------------------------------
 
-Chi gestisce equipe-track ti fornisce:
-  - l'indirizzo del server (es. https://track.esempio.it);
-  - il codice di collegamento dell'agente (il "token agente");
-  - in alcuni casi anche un "segreto gate".
+Chi gestisce equipe-track ti fornisce il codice di collegamento dell'agente.
+L'indirizzo del server è già impostato: non devi inserirlo.
 
 Al primo avvio si aprono da sole le Impostazioni. In seguito: clic destro
 sull'icona di e-track agent → "Impostazioni…".
 
-1. Nella sezione "equipe-track" compila:
-     Server        → l'indirizzo del server, completo di https://
-     Token agente  → il codice di collegamento
-     Segreto gate  → solo se te l'hanno dato, altrimenti lascialo vuoto
+1. Nella sezione "equipe-track" incolla il codice nel campo
+   "Codice di collegamento".
 2. Premi "Salva nelle credenziali di Windows".
 
-Server, token e segreto vengono salvati in Gestione credenziali di Windows
-(cifrati con il tuo profilo utente), mai in file di testo.
+Il codice viene salvato in Gestione credenziali di Windows (cifrato con il
+tuo profilo utente), mai in file di testo.
 
 Lo stato del collegamento compare in cima alla sezione e nella finestrella
 del report. Il tempo viene tracciato solo mentre hai una sessione aperta

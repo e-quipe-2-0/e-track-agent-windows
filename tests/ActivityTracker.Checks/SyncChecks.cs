@@ -264,7 +264,7 @@ public static class SyncChecks
 
     private static void Validation()
     {
-        Section("equipe-track: validazione di URL, token e cookie");
+        Section("equipe-track: server incorporato, validazione di URL e token");
         string? Ok(string u, bool flag = false) => SyncClient.Validate(u, flag) is { Url: { } url } ? SyncClient.Text(url) : null;
         SyncErrorKind? Err(string u, bool flag = false) => SyncClient.Validate(u, flag).Error?.Kind;
         Check("https ok, barra finale tolta", Ok("https://track.esempio.it/") == "https://track.esempio.it", Ok("https://track.esempio.it/") ?? "null");
@@ -283,17 +283,23 @@ public static class SyncChecks
               SyncClient.IsWellFormedToken(new string('a', 20)) && SyncClient.IsWellFormedToken("Ab_9-" + new string('x', 40))
               && !SyncClient.IsWellFormedToken("corto") && !SyncClient.IsWellFormedToken(new string('a', 30) + "!")
               && !SyncClient.IsWellFormedToken(new string('a', 201)));
-        Check("cookie del gate: caratteri speciali in %XX", SyncClient.GateCookieValue("a b;c=d%") == "a%20b%3Bc%3Dd%25" && SyncClient.GateCookieValue("Abc-1_2.3~") == "Abc-1_2.3~");
+        Check("server incorporato: https://equipetrack.e-quipe.com, valido senza flag",
+              SyncClient.EnvironmentServerUrl(new Dictionary<string, string>()) == "https://equipetrack.e-quipe.com"
+              && Ok(SyncClient.DefaultServerUrl) == "https://equipetrack.e-quipe.com");
+        Check("AT_SERVER_URL sostituisce il server incorporato (vuoto = incorporato)",
+              SyncClient.EnvironmentServerUrl(new Dictionary<string, string> { ["AT_SERVER_URL"] = " http://localhost:3000 " }) == "http://localhost:3000"
+              && SyncClient.EnvironmentServerUrl(new Dictionary<string, string> { ["AT_SERVER_URL"] = "" }) == SyncClient.DefaultServerUrl);
 
         var creds = new InMemoryTokenStore();
         Check("credenziali assenti → nil", EquipeCredentials.Load(creds) is null);
-        new EquipeCredentials("http://localhost:3000", "tok", "segreto").Save(creds);
-        Check("credenziali: roundtrip delle tre voci", EquipeCredentials.Load(creds) == new EquipeCredentials("http://localhost:3000", "tok", "segreto"));
-        new EquipeCredentials("http://localhost:3000", "tok", "").Save(creds);
-        Check("segreto vuoto → voce tolta", creds.Token(EquipeCredentials.Account.GateSecret) is null && creds.Count == 2);
+        creds.Save("vecchio segreto", EquipeCredentials.Account.LegacyGateSecret);
+        new EquipeCredentials(SyncClient.DefaultServerUrl, "tok").Save(creds);
+        Check("credenziali: roundtrip di URL e token", EquipeCredentials.Load(creds) == new EquipeCredentials(SyncClient.DefaultServerUrl, "tok"));
+        Check("salvataggio: la vecchia voce del segreto si toglie, restano URL e token",
+              creds.Token(EquipeCredentials.Account.LegacyGateSecret) is null && creds.Count == 2);
         EquipeCredentials.Delete(creds);
         Check("scollega: nessuna voce resta", creds.Count == 0);
-        Check("le credenziali non si stampano mai", !new EquipeCredentials("https://x.it", "tok_segretissimo_123456789", "pw").ToString().Contains("segretissimo"));
+        Check("le credenziali non si stampano mai", !new EquipeCredentials("https://x.it", "tok_segretissimo_123456789").ToString().Contains("segretissimo"));
     }
 
     private static void Client()
@@ -301,14 +307,14 @@ public static class SyncChecks
         Section("equipe-track: client con trasporto finto");
         var transport = new MockTransport();
         var token = "tok_" + new string('A', 32);
-        var client = new SyncClient(new Uri("https://track.esempio.it"), token, "s3greto;x", "9.9.9", transport);
+        var client = new SyncClient(new Uri("https://track.esempio.it"), token, "9.9.9", transport);
 
         transport.Responses.Enqueue(new(200, """{"ok":true,"traccia":true,"sessione":{"id":"s1","giorno":"2024-03-10","tipo":"ordinaria","inizio":"2024-03-10T08:00:00.000Z","inPausa":false},"adesso":"2024-03-10T10:00:00.000Z"}"""));
         var (r, _, _) = client.SessioneAsync().GetAwaiter().GetResult();
         var req = transport.Last!;
         Check("sessione: GET /api/agente/sessione", req.Method == "GET" && req.Url == "https://track.esempio.it/api/agente/sessione", req.Url);
         Check("Authorization: Bearer <token>", req.Headers.GetValueOrDefault("Authorization") == "Bearer " + token);
-        Check("Cookie: et_gate=<segreto codificato>", req.Headers.GetValueOrDefault("Cookie") == "et_gate=s3greto%3Bx");
+        Check("nessun cookie: basta il Bearer", !req.Headers.ContainsKey("Cookie"));
         Check("versione dell'agente in X-Agente-Versione", req.Headers.GetValueOrDefault("X-Agente-Versione") == "9.9.9");
         Check("sessione: risposta decodificata", r.Traccia && r.Sessione?.Id == "s1" && r.Sessione?.Giorno == "2024-03-10" && r.Sessione?.InPausa == false);
         Check("versione predefinita: quella del Mac più la piattaforma", AppIdentity.AgentVersion == "0.3.0-windows");
@@ -329,11 +335,9 @@ public static class SyncChecks
         client.StopAsync(null).GetAwaiter().GetResult();
         Check("stop senza istante: corpo {} (il server usa adesso)", Encoding.UTF8.GetString(transport.Last!.Body) == "{}");
 
-        var noGate = new SyncClient(new Uri("https://track.esempio.it"), token, null, transport: transport);
         transport.Responses.Enqueue(new(200, """{"ok":true,"traccia":false,"sessione":null,"adesso":"2024-03-10T10:00:00Z"}"""));
-        var (none, _, _) = noGate.SessioneAsync().GetAwaiter().GetResult();
-        Check("senza segreto: nessun cookie; adesso senza millisecondi accettato", !transport.Last!.Headers.ContainsKey("Cookie")
-              && none.Sessione is null && SyncJson.ParseInstant(none.Adesso) is not null);
+        var (none, _, _) = client.SessioneAsync().GetAwaiter().GetResult();
+        Check("nessuna sessione; adesso senza millisecondi accettato", none.Sessione is null && SyncJson.ParseInstant(none.Adesso) is not null);
 
         SyncFault? Failure(MockTransport.Canned canned)
         {
@@ -345,13 +349,14 @@ public static class SyncChecks
         {
             var t = new MockTransport();
             t.Responses.Enqueue(new(401, body, Headers: headers));
-            var c = new SyncClient(new Uri("https://track.esempio.it"), token, "x", transport: t);
+            var c = new SyncClient(new Uri("https://track.esempio.it"), token, transport: t);
             try { c.SessioneAsync().GetAwaiter().GetResult(); return null; }
             catch (SyncException e) { return e.Fault; }
         }
         Check("401 della rotta (WWW-Authenticate: Bearer) → token rifiutato",
               Failure401(new() { ["WWW-Authenticate"] = "Bearer" }, """{"ok":false,"errore":"token mancante, revocato o non valido"}""")?.Kind == SyncErrorKind.Unauthorized);
-        Check("401 del gate (testo «Accesso negato») → segreto del gate", Failure401([], "Accesso negato")?.Kind == SyncErrorKind.Gate);
+        Check("401 del proxy di perimetro (testo «Accesso negato») → blocco del perimetro, da ritentare",
+              Failure401([], "Accesso negato") is { Kind: SyncErrorKind.Gate, IsRetryable: true });
         Check("422 → errore e indice del tratto", Failure(new(422, """{"ok":false,"errore":"tratti sovrapposti","indice":3}""")) == new SyncFault(SyncErrorKind.Unprocessable, "tratti sovrapposti", 3));
         Check("422 senza indice", Failure(new(422, """{"ok":false,"errore":"giorno nel futuro"}""")) == new SyncFault(SyncErrorKind.Unprocessable, "giorno nel futuro"));
         Check("400 → badRequest col messaggio", Failure(new(400, """{"ok":false,"errore":"corpo non JSON"}""")) == new SyncFault(SyncErrorKind.BadRequest, "corpo non JSON"));
@@ -360,7 +365,7 @@ public static class SyncChecks
         Check("timeout → rete «tempo scaduto»", Failure(new(0, "", new TaskCanceledException("timeout"))) == new SyncFault(SyncErrorKind.Network, "tempo scaduto"));
         Check("200 con JSON non conforme → decoding", Failure(new(200, """{"nope":1}"""))?.Kind == SyncErrorKind.Decoding);
         var bodies = transport.Requests.Select(x => Encoding.UTF8.GetString(x.Body)).ToList();
-        Check("token e segreto non compaiono mai nei corpi", !bodies.Any(b => b.Contains(token) || b.Contains("s3greto")));
+        Check("il token non compare mai nei corpi", !bodies.Any(b => b.Contains(token)));
     }
 
     private static void Migrations()

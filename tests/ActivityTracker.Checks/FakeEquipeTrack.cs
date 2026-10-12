@@ -10,8 +10,8 @@ namespace ActivityTracker.Checks;
 
 // IL GIRO INTERO CONTRO UN SERVER FINTO.
 //
-// Un piccolo server HTTP su 127.0.0.1 (porta a caso) che fa la parte di equipe-track: il gate di perimetro
-// (cookie `et_gate`), il token `Bearer` e le tre rotte dell'agente, con le regole del contratto riscritte qui in
+// Un piccolo server HTTP su 127.0.0.1 (porta a caso) che fa la parte di equipe-track: il token `Bearer` (col quale
+// il proxy di perimetro lascia passare l'agente) e le tre rotte dell'agente, con le regole del contratto riscritte qui in
 // piccolo da `src/lib/domain/agente.ts` e `src/app/api/agente/*/route.ts`. L'agente ci parla con il suo client
 // vero (HttpClient, intestazioni, JSON): se il giro passa qui, il giro vero cambia solo l'indirizzo.
 
@@ -33,7 +33,6 @@ public sealed class FakeEquipeTrack : IDisposable
     private const double Sovrapposizione = 2;
 
     public string Token { get; }
-    public string GateSecret { get; }
     public int Port { get; private set; }
 
     private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
@@ -43,10 +42,9 @@ public sealed class FakeEquipeTrack : IDisposable
     private readonly Dictionary<string, List<JsonObject>> _giornate = [];
     private readonly List<Richiesta> _richieste = [];
 
-    public FakeEquipeTrack(string token, string gateSecret)
+    public FakeEquipeTrack(string token)
     {
         Token = token;
-        GateSecret = gateSecret;
     }
 
     public bool Start()
@@ -177,13 +175,7 @@ public sealed class FakeEquipeTrack : IDisposable
         {
             _richieste.Add(r);
 
-            // 1. Il gate di perimetro: senza il cookie giusto le API rispondono 401 in testo semplice.
-            var cookies = r.Intestazioni.GetValueOrDefault("cookie", "").Split(';').Select(c => c.Trim());
-            var gate = cookies.FirstOrDefault(c => c.StartsWith("et_gate=", StringComparison.Ordinal)) is { } c1
-                ? Uri.UnescapeDataString(c1["et_gate=".Length..]) : null;
-            if (gate != GateSecret) return Response(401, text: "Accesso negato");
-
-            // 2. Il token: stessa risposta per assente, sbagliato o revocato.
+            // Il token: stessa risposta per assente, sbagliato o revocato.
             var auth = r.Intestazioni.GetValueOrDefault("authorization", "");
             var given = auth.StartsWith("Bearer ", StringComparison.Ordinal) ? auth[7..].Trim() : "";
             if (!SyncClient.IsWellFormedToken(given) || given != Token)
@@ -302,8 +294,7 @@ public sealed class FakeEquipeTrack : IDisposable
     {
         Section("equipe-track: il giro intero contro un server finto (HTTP vero su 127.0.0.1)");
         var token = "tok_" + Guid.NewGuid().ToString("N");
-        const string secret = "segreto di prova; con caratteri=strani";
-        using var server = new FakeEquipeTrack(token, secret);
+        using var server = new FakeEquipeTrack(token);
         if (!server.Start())
         {
             Check("server finto in ascolto su 127.0.0.1", false, "impossibile aprire la porta");
@@ -315,7 +306,7 @@ public sealed class FakeEquipeTrack : IDisposable
             Check("URL del server finto valido", false);
             return;
         }
-        var client = new SyncClient(baseUrl, token, secret, "checks");
+        var client = new SyncClient(baseUrl, token, "checks");
 
         SyncFault? Failure<T>(Func<Task<T>> op)
         {
@@ -325,12 +316,8 @@ public sealed class FakeEquipeTrack : IDisposable
 
         try
         {
-            // Perimetro e token.
-            var wrongGate = new SyncClient(baseUrl, token, "sbagliato");
-            var noGate = new SyncClient(baseUrl, token, null);
-            var wrongToken = new SyncClient(baseUrl, "tok_" + new string('z', 30), secret);
-            Check("segreto del gate sbagliato → rifiuto del gate", Failure(() => wrongGate.SessioneAsync())?.Kind == SyncErrorKind.Gate);
-            Check("senza cookie del gate → rifiuto del gate", Failure(() => noGate.SessioneAsync())?.Kind == SyncErrorKind.Gate);
+            // Token.
+            var wrongToken = new SyncClient(baseUrl, "tok_" + new string('z', 30));
             Check("token sbagliato → token rifiutato", Failure(() => wrongToken.SessioneAsync())?.Kind == SyncErrorKind.Unauthorized);
 
             // Letture della sessione. Le chiamate sono vere e fatte adesso; gli istanti registrati sono quelli di
@@ -402,10 +389,10 @@ public sealed class FakeEquipeTrack : IDisposable
             var corpi = string.Concat(post.Select(x => Encoding.UTF8.GetString(x.Corpo))).ToLowerInvariant();
             foreach (var vietato in new[] { "youtube.com", "segreto", "riservato", ".docx", "chrome.exe", "figma.exe", "winword", "google chrome", "http" })
                 Check($"nulla di «{vietato}» nei corpi inviati", !corpi.Contains(vietato));
-            Check("ogni richiesta porta Bearer e cookie del gate",
+            Check("ogni richiesta porta il Bearer e nessun cookie",
                   server.RichiesteRicevute().Count(x => x.Intestazioni.GetValueOrDefault("authorization") == "Bearer " + token) >= post.Count
-                  && post.All(x => x.Intestazioni.GetValueOrDefault("cookie", "").StartsWith("et_gate=", StringComparison.Ordinal)
-                                   && x.Intestazioni.GetValueOrDefault("x-agente-versione") == "checks"));
+                  && server.RichiesteRicevute().All(x => !x.Intestazioni.ContainsKey("cookie"))
+                  && post.All(x => x.Intestazioni.GetValueOrDefault("x-agente-versione") == "checks"));
             CheckT("niente di cambiato → niente da inviare", () => sync.PendingInvii(segments, [], resolver).Count == 0);
 
             // Chiusura d'ufficio anteriore alle letture (otto ore, mezzanotte UTC): il server rifiuta il tratto dopo

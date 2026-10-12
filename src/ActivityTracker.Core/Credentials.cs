@@ -22,17 +22,18 @@ public sealed class InMemoryTokenStore : ITokenStore
 }
 
 /// <summary>
-/// Le tre credenziali dell'agente verso equipe-track, tutte nel deposito sicuro (mai in file di impostazioni, mai nel
-/// codice): URL del server, token dell'agente (emesso da <c>npm run agente:token</c>) e segreto del gate
-/// (<c>ACCESS_SECRET</c>, mandato come cookie <c>et_gate</c>; facoltativo, vuoto = nessun cookie).
+/// Le due credenziali dell'agente verso equipe-track, entrambe nel deposito sicuro (mai in file di impostazioni, mai nel
+/// codice): URL del server (quello incorporato, <c>SyncClient.DefaultServerUrl</c>, salvo test) e token dell'agente, il
+/// «codice di collegamento» emesso da <c>npm run agente:token</c>. URL e token vanno in coppia: il token vale per quel server.
 /// </summary>
-public sealed record EquipeCredentials(string ServerUrl, string Token, string GateSecret)
+public sealed record EquipeCredentials(string ServerUrl, string Token)
 {
     public static class Account
     {
         public const string ServerUrl = "server-url";
         public const string Token = "agent-token";
-        public const string GateSecret = "gate-secret";
+        /// <summary>Voce delle versioni che mandavano il cookie del gate: non si usa più, si toglie a ogni salvataggio.</summary>
+        public const string LegacyGateSecret = "gate-secret";
     }
 
     /// <summary>null se manca l'URL o il token.</summary>
@@ -41,24 +42,23 @@ public sealed record EquipeCredentials(string ServerUrl, string Token, string Ga
         var url = store.Token(Account.ServerUrl);
         var token = store.Token(Account.Token);
         if (string.IsNullOrEmpty(url) || string.IsNullOrEmpty(token)) return null;
-        return new EquipeCredentials(url, token, store.Token(Account.GateSecret) ?? "");
+        return new EquipeCredentials(url, token);
     }
 
     public void Save(ITokenStore store)
     {
         store.Save(ServerUrl, Account.ServerUrl);
         store.Save(Token, Account.Token);
-        if (GateSecret.Length == 0) store.Delete(Account.GateSecret);
-        else store.Save(GateSecret, Account.GateSecret);
+        store.Delete(Account.LegacyGateSecret);
     }
 
     public static void Delete(ITokenStore store)
     {
         store.Delete(Account.ServerUrl);
         store.Delete(Account.Token);
-        store.Delete(Account.GateSecret);
+        store.Delete(Account.LegacyGateSecret);
     }
 
-    /// <summary>Mai il token o il segreto in un log o in un messaggio.</summary>
-    public override string ToString() => $"EquipeCredentials({ServerUrl}, token ***, gate {(GateSecret.Length > 0 ? "***" : "-")})";
+    /// <summary>Mai il token in un log o in un messaggio.</summary>
+    public override string ToString() => $"EquipeCredentials({ServerUrl}, token ***)";
 }
