@@ -4,7 +4,8 @@ namespace ActivityTracker.Windows;
 
 /// <summary>
 /// Avvio all'accesso a Windows: valore in <c>HKCU\Software\Microsoft\Windows\CurrentVersion\Run</c> (per utente,
-/// senza amministratore). L'installer lo scrive già; l'app lo riscrive al primo avvio e dalle Impostazioni.
+/// senza amministratore). L'installer lo scrive già; l'app lo riscrive a ogni avvio (se la persona non l'ha spento
+/// dalle Impostazioni: <c>LoginItemPolicy</c> nel Core) e dalle Impostazioni.
 /// Windows può disattivarlo da Impostazioni › App › Avvio (o Gestione attività): in quel caso il valore resta ma è
 /// spento in <c>StartupApproved\Run</c>, e lo stato lo dice.
 /// </summary>
@@ -14,7 +15,38 @@ public static class LoginItem
     private const string ApprovedKey = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
     public const string ValueName = Core.AppIdentity.InternalName;
 
-    private static string Command => $"\"{Environment.ProcessPath}\" --autostart";
+    /// <summary>Il comando che deve stare in <c>Run</c>: questa copia dell'app.</summary>
+    public static string Command => $"\"{Environment.ProcessPath}\" --autostart";
+
+    /// <summary>Il valore presente in <c>Run</c>; null se non c'è o non si legge.</summary>
+    public static string? CurrentValue()
+    {
+        try
+        {
+            using var run = Registry.CurrentUser.OpenSubKey(RunKey);
+            return run?.GetValue(ValueName) as string;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Riscrittura all'avvio: solo il valore in <c>Run</c>. Se la persona ha spento la voce da Windows
+    /// (Impostazioni › App › Avvio) quella scelta resta: <c>StartupApproved</c> non si tocca.</summary>
+    public static string WriteAtLaunch()
+    {
+        try
+        {
+            using var run = Registry.CurrentUser.CreateSubKey(RunKey);
+            run.SetValue(ValueName, Command);
+        }
+        catch (Exception e)
+        {
+            return "Errore: " + e.Message;
+        }
+        return Status();
+    }
 
     public static bool IsEnabled => Status() == "Attivo";
 

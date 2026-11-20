@@ -69,7 +69,7 @@ public sealed class AppModel : ISyncDataSource, IDisposable
         Monitor.DidUnlock += Sync.SystemDidUnlock;
         // Spegnimento, riavvio o disconnessione: flush, ultimo invio e chiusura della sessione su equipe-track.
         Monitor.WillPowerOff += powerOff => Shutdown(closeSession: powerOff);
-        RegisterLoginItemIfFirstLaunch();
+        RefreshLoginItemAtLaunch();
         RefreshReport();
         if (Store is not null)
         {
@@ -101,16 +101,25 @@ public sealed class AppModel : ISyncDataSource, IDisposable
         Store?.Dispose();
     }
 
-    private void RegisterLoginItemIfFirstLaunch()
+    /// <summary>A ogni avvio, non solo al primo: se la persona non l'ha spento dalle Impostazioni la voce <c>Run</c>
+    /// viene (ri)scritta con il percorso di questa copia, così sopravvive a un aggiornamento che cambia percorso.
+    /// La decisione è <see cref="LoginItemPolicy.AtLaunch"/>; <c>AT_NO_LOGIN_ITEM=1</c> salta tutto.</summary>
+    private void RefreshLoginItemAtLaunch()
     {
-        if (!AppSettings.SkipLoginItem && !Settings.LoginItemAttempted)
+        var action = LoginItemPolicy.AtLaunch(AppSettings.SkipLoginItem, Settings.LoginItemDisabledByUser, LoginItem.CurrentValue(), LoginItem.Command);
+        switch (action)
         {
-            Settings.LoginItemAttempted = true;
-            LoginStatus = LoginItem.Enable();
-        }
-        else
-        {
-            LoginStatus = LoginItem.Status();
+            case LoginItemAction.Write:
+                LoginStatus = LoginItem.WriteAtLaunch();
+                Log.Write("[AppModel] avvio all'accesso: voce riscritta (" + LoginStatus + ")");
+                break;
+            case LoginItemAction.Remove:
+                LoginStatus = LoginItem.Disable();
+                Log.Write("[AppModel] avvio all'accesso: spento dalle Impostazioni, voce tolta");
+                break;
+            default:
+                LoginStatus = LoginItem.Status();
+                break;
         }
     }
 
@@ -296,7 +305,12 @@ public sealed class AppModel : ISyncDataSource, IDisposable
 
     // Avvio all'accesso
 
-    public void SetLaunchAtLogin(bool enabled) => LoginStatus = enabled ? LoginItem.Enable() : LoginItem.Disable();
+    /// <summary>La casella delle Impostazioni: la scelta resta scritta, e agli avvii successivi viene rispettata.</summary>
+    public void SetLaunchAtLogin(bool enabled)
+    {
+        Settings.LoginItemDisabledByUser = !enabled;
+        LoginStatus = enabled ? LoginItem.Enable() : LoginItem.Disable();
+    }
 
     public void RefreshLoginStatus() => LoginStatus = LoginItem.Status();
 

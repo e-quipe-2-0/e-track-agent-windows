@@ -71,7 +71,8 @@ download e non ripete l'avviso. Per eliminarlo serve un certificato di firma del
 ## Installazione e permessi
 
 L'installer è per utente, senza UAC: `%LOCALAPPDATA%\Programs\activity-tracker\activity-tracker.exe`, collegamento nel
-menu Start, avvio all'accesso in `HKCU\…\Run`, voce in «App installate» con disinstallazione (che chiede se togliere
+menu Start, avvio all'accesso in `HKCU\…\Run` (l'agente riscrive la voce a ogni avvio, così sopravvive a un aggiornamento
+che cambia percorso; smette solo se la spegni dalle sue Impostazioni), voce in «App installate» con disinstallazione (che chiede se togliere
 anche dati e credenziali). Aggiornare = rilanciare il nuovo installer: chiude la copia attiva con garbo
 (`activity-tracker.exe --quit`: flush e ultimo invio) e la sostituisce.
 
@@ -125,7 +126,7 @@ Identico al Mac ([docs/EQUIPE-TRACK.md](../activity-tracker/docs/EQUIPE-TRACK.md
 
 ## Variabili d'ambiente (prove)
 
-- `AT_NO_LOGIN_ITEM=1`: non registra l'avvio all'accesso al primo avvio.
+- `AT_NO_LOGIN_ITEM=1`: all'avvio non tocca la voce di avvio all'accesso (né la riscrive né la toglie).
 - `AT_NO_BROWSER_URL=1` (o `AT_NO_APPLE_EVENTS=1`, come sul Mac): non legge la barra degli indirizzi.
 - `AT_DB_PATH=C:\percorso\file.sqlite`: usa un altro database.
 - `AT_SERVER_URL=https://…`: si collega a questo server invece di quello incorporato (solo prove).

@@ -94,7 +94,9 @@ Section "Installa"
   Delete "$SMPROGRAMS\${APP_NAME}.lnk"
   CreateShortcut "$SMPROGRAMS\${PRODUCT_NAME}.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
 
-  ; Avvio all'accesso a Windows (per utente). L'app lo gestisce anche dalle Impostazioni.
+  ; Avvio all'accesso a Windows (per utente). L'app riscrive questa voce a ogni avvio (se la persona non l'ha spenta
+  ; dalle Impostazioni dell'agente: in quel caso la toglie di nuovo) e la gestisce dalle Impostazioni.
+  ; La disinstallazione la toglie (sezione Uninstall); a fine installazione l'app parte dalla pagina finale.
   WriteRegStr HKCU "${RUN_KEY}" "${APP_NAME}" '"$INSTDIR\${APP_EXE}" --autostart'
 
   ; Voce in Impostazioni › App › App installate.

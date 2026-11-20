@@ -32,7 +32,7 @@ public sealed class AppSettings
     {
         [JsonPropertyName("thresholdMinutes")] public int? ThresholdMinutes { get; set; }
         [JsonPropertyName("videoExclusions")] public List<string>? VideoExclusions { get; set; }
-        [JsonPropertyName("loginItemAttempted")] public bool LoginItemAttempted { get; set; }
+        [JsonPropertyName("loginItemDisabledByUser")] public bool LoginItemDisabledByUser { get; set; }
         [JsonPropertyName("linkAttempted")] public bool LinkAttempted { get; set; }
         [JsonPropertyName("deviceGuid")] public string? DeviceGuid { get; set; }
     }
@@ -75,12 +75,15 @@ public sealed class AppSettings
         }
     }
 
-    public bool LoginItemAttempted
+    /// <summary>La persona ha spento «Avvia all'accesso a Windows» dalle Impostazioni (true quando la spegne, false
+    /// quando la riaccende): finché è true la voce <c>Run</c> non si riscrive agli avvii.</summary>
+    public bool LoginItemDisabledByUser
     {
-        get => _data.LoginItemAttempted;
+        get => _data.LoginItemDisabledByUser;
         set
         {
-            _data.LoginItemAttempted = value;
+            if (_data.LoginItemDisabledByUser == value) return;
+            _data.LoginItemDisabledByUser = value;
             Save();
         }
     }
@@ -125,7 +128,7 @@ public sealed class AppSettings
 
     // Variabili d'ambiente (prove)
 
-    /// <summary><c>AT_NO_LOGIN_ITEM=1</c>: non registra l'avvio all'accesso al primo avvio.</summary>
+    /// <summary><c>AT_NO_LOGIN_ITEM=1</c>: all'avvio non tocca la voce di avvio all'accesso (né la scrive né la toglie).</summary>
     public static bool SkipLoginItem => Flag("AT_NO_LOGIN_ITEM");
     /// <summary><c>AT_DEVICE_ID=&lt;64 esadecimali&gt;</c>: impronta del computer fissata a mano (prove).</summary>
     public static string? DeviceIdOverride => Environment.GetEnvironmentVariable(DeviceIdentity.Variable);

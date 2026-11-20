@@ -76,6 +76,22 @@ public static class SyncChecks
         Client();
         Migrations();
         VideoRule();
+        LoginItem();
+    }
+
+    private static void LoginItem()
+    {
+        Section("Windows: avvio automatico all'accensione (la voce Run a ogni avvio)");
+        const string here = "\"C:\\Users\\io\\AppData\\Local\\Programs\\activity-tracker\\activity-tracker.exe\" --autostart";
+        const string elsewhere = "\"D:\\Vecchia cartella\\activity-tracker.exe\" --autostart";
+        LoginItemAction At(bool skip, bool disabled, string? current) => LoginItemPolicy.AtLaunch(skip, disabled, current, here);
+        Check("voce assente (primo avvio, o cancellata) → si scrive", At(false, false, null) == LoginItemAction.Write && At(false, false, "") == LoginItemAction.Write);
+        Check("voce che punta a un altro percorso (aggiornamento) → si riscrive", At(false, false, elsewhere) == LoginItemAction.Write);
+        Check("voce già giusta → niente (maiuscole del percorso indifferenti)", At(false, false, here) == LoginItemAction.None && At(false, false, here.ToUpperInvariant()) == LoginItemAction.None);
+        Check("spenta dalla persona nelle Impostazioni → non si riscrive", At(false, true, null) == LoginItemAction.None);
+        Check("spenta dalla persona ma riscritta da un installer → si toglie di nuovo", At(false, true, here) == LoginItemAction.Remove && At(false, true, elsewhere) == LoginItemAction.Remove);
+        Check("AT_NO_LOGIN_ITEM=1 salta tutto: non scrive, non riscrive, non toglie",
+              new[] { At(true, false, null), At(true, false, elsewhere), At(true, false, here), At(true, true, here), At(true, true, null) }.All(a => a == LoginItemAction.None));
     }
 
     private static void Tratti()
