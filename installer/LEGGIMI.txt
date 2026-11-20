@@ -18,7 +18,7 @@ Non servono diritti di amministratore.
 
 L'app si installa solo per il tuo utente, in
 %LOCALAPPDATA%\Programs\activity-tracker, e parte da sola a ogni accesso
-a Windows.
+a Windows (puoi spegnere l'avvio automatico da "Impostazioni…" → "Avvio").
 
 
 2. PRIMO AVVIO: "ULTERIORI INFORMAZIONI" → "ESEGUI COMUNQUE"
@@ -47,21 +47,26 @@ in quel caso rivolgiti a chi gestisce i PC.
 3. COLLEGAMENTO A EQUIPE-TRACK
 ------------------------------
 
-Chi gestisce equipe-track ti fornisce il codice di collegamento dell'agente.
-L'indirizzo del server è già impostato: non devi inserirlo.
+Non c'è nessun codice da copiare e nessun indirizzo da inserire.
 
-Al primo avvio si aprono da sole le Impostazioni. In seguito: clic destro
-sull'icona di e-track agent → "Impostazioni…".
+1. Apri e-track agent (dopo l'installazione parte da solo).
+2. Si apre il browser sulla pagina "Collega questo computer" di
+   equipe-track: se te lo chiede, entra con il tuo PIN.
+3. Premi "Collega". Fatto: entro pochi secondi l'agente è collegato.
 
-1. Nella sezione "equipe-track" incolla il codice nel campo
-   "Codice di collegamento".
-2. Premi "Salva nelle credenziali di Windows".
+Hai dieci minuti per premere "Collega". Se passano, o se chiudi il
+browser, fai clic destro sull'icona di e-track agent → "Collega questo
+computer" e ripeti i passi 2 e 3. Il browser si apre da solo soltanto la
+prima volta: in seguito il collegamento parte da quella voce di menu
+(o da "Impostazioni…" → sezione "equipe-track").
 
-Il codice viene salvato in Gestione credenziali di Windows (cifrato con il
-tuo profilo utente), mai in file di testo.
+Il collegamento viene salvato in Gestione credenziali di Windows (cifrato
+con il tuo profilo utente), mai in file di testo. Per toglierlo:
+"Impostazioni…" → sezione "equipe-track" → "Scollega".
 
-Lo stato del collegamento compare in cima alla sezione e nella finestrella
-del report. Il tempo viene tracciato solo mentre hai una sessione aperta
+Lo stato del collegamento ("In attesa del collegamento nel browser…",
+"Collegato", "Collegamento scaduto: riprova dal menu") compare in cima al
+menu dell'icona, nelle Impostazioni e nella finestrella del report. Il tempo viene tracciato solo mentre hai una sessione aperta
 (e non in pausa) su equipe-track: l'icona ha le barre verdi quando traccia,
 grigie quando non traccia.
 
@@ -73,7 +78,8 @@ grigie quando non traccia.
       YouTube   33,6%  2h35  (di cui passivo 1h50)
       Attivo senza utilizzo   22,0%  1h42
       Totale 100,0% · Fuori sessione 3h10
-- Clic destro sull'icona: report, Impostazioni, Invia ora, Esci.
+- Clic destro sull'icona: stato del collegamento, report, "Collega questo
+  computer" (solo se non sei collegato), Impostazioni, Invia ora, Esci.
 - Se l'icona non si vede, è tra le icone nascoste: clicca la freccia ^
   vicino all'orologio. Puoi trascinarla sulla barra per tenerla sempre
   visibile.

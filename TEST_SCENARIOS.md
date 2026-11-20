@@ -10,7 +10,8 @@ sull'icona nella tray).
 1. Installa con `dist\e-track-agent-windows-setup.exe` (SmartScreen: «Ulteriori informazioni» → «Esegui comunque»).
    L'app parte dalla pagina finale dell'installazione e compare come icona vicino all'orologio (se non la vedi:
    freccia **^** delle icone nascoste).
-2. **Collega equipe-track e apri una sessione** (Impostazioni → equipe-track). Senza sessione aperta l'agente misura
+2. **Collega equipe-track e apri una sessione**: al primo avvio si apre il browser, premi «Collega» (in seguito:
+   clic destro sull'icona → «Collega questo computer»). Senza sessione aperta l'agente misura
    lo stesso, ma nel report locale le app compaiono come «Non tracciato» (regola della privacy, identica al Mac):
    per vedere i nomi delle attività serve una sessione aperta e non in pausa.
 3. Impostazioni di Windows → Sistema → Alimentazione: **Spegni lo schermo dopo 20 minuti** (alimentazione da rete e,

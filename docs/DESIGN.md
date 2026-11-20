@@ -17,11 +17,14 @@ Swift, verificata con gli stessi casi dei check Swift).
 | SQLite: tabelle, colonne, migrazioni (`grdb_migrations`) | `Store.swift` (GRDB) | `Store.cs` (Microsoft.Data.Sqlite) |
 | Registro delle sessioni, finestre di contenuto, troncamenti | `TrackingLedger.swift`, `TrackingSync.swift` | idem `.cs` |
 | Tratti, hash, filtro privacy dei nomi, 422 con indice | `SyncPayloadBuilder.swift` | `SyncPayloadBuilder.cs` (+ `PrivacyFilter` = `motivoNomeRifiutato`) |
-| Client: 3 rotte, Bearer (nessun cookie), server incorporato, 401 rotta/proxy | `SyncClient.swift` | `SyncClient.cs` |
+| Client: 3 rotte, Bearer (nessun cookie), server incorporato, 401 rotta/proxy, `X-Agente-Permessi` | `SyncClient.swift` | `SyncClient.cs` |
+| Collegamento senza codici: richiesta, browser, ritiro del token; stati e scadenza | il flusso gemello dell'agente Mac | `DeviceLink.cs` (+ `Sync/DeviceLinkService.cs` nell'app) |
 | Servizio di sync: 60 s / 5 min / ripresa / sblocco / spegnimento (8 s) | `SyncService.swift` | `Sync/SyncService.cs` |
 
 Le uniche costanti diverse: le regole «app» del seed usano l'eseguibile (`zoom.exe`, `ms-teams.exe`, `teams.exe`)
-invece del bundle id; FaceTime non c'è. La versione dichiarata a equipe-track è `0.3.0-windows`.
+invece del bundle id; FaceTime non c'è. `X-Agente-Permessi` vale sempre `ok`: su Windows non ci sono permessi di
+sistema da concedere. L'impronta del computer per il collegamento è lo SHA-256 del `MachineGuid` di Windows (con un
+prefisso dell'app), al posto dell'identificativo hardware del Mac. La versione dichiarata a equipe-track è `0.4.0-windows`.
 
 ## Segnali: Mac → Windows
 
@@ -39,7 +42,9 @@ invece del bundle id; FaceTime non c'è. La versione dichiarata a equipe-track �
 | Dominio della scheda | Apple Events | UI Automation sulla barra degli indirizzi (Chrome, Edge, Brave, Opera, Vivaldi, Arc, Firefox), su un thread proprio, cache 2,5 s; solo l'host (`HostFromAddressBar`) | nessuno |
 | Titolo finestra (ripiego) | Accessibilità (AX) | `GetWindowTextW` | nessuno |
 | Credenziali | Portachiavi | Gestione credenziali (`CredWriteW`, generiche, per utente) | nessuno |
-| Avvio al login | `SMAppService` / LaunchAgent | `HKCU\…\Run` (stato «disattivato da Windows» letto da `StartupApproved\Run`) | nessuno |
+| Avvio al login | `SMAppService` / LaunchAgent | `HKCU\…\Run`, riscritto a ogni avvio se la persona non l'ha spento dalle Impostazioni (`LoginItemPolicy`; stato «disattivato da Windows» letto da `StartupApproved\Run`) | nessuno |
+| Impronta del computer | identificativo hardware | `HKLM\SOFTWARE\Microsoft\Cryptography\MachineGuid` → SHA-256 (ripiego: GUID in `settings.json`) | nessuno |
+| Apertura del browser per il collegamento | `NSWorkspace.open` | `Process.Start` con `UseShellExecute` (browser predefinito) | nessuno |
 
 **Sessione aperta** = sveglio ∧ schermo acceso ∧ sbloccato ∧ niente salvaschermo ∧ sessione utente attiva: stessa
 definizione del Mac, stesso effetto sul motore (`SessionWillClose` chiude subito la coda e persiste).
@@ -71,8 +76,24 @@ rete su un altro thread.
 ## Interfaccia
 
 - Icona nella tray: barre verdi quando traccia, grigie quando no; suggerimento con lo stato. Clic sinistro: report;
-  clic destro: menu (report, Impostazioni, Invia ora, Esci).
+  clic destro: menu (riga di stato del collegamento, report, «Collega questo computer» se non collegato o se il
+  server ha rifiutato il token, Impostazioni, Invia ora, Esci).
 - Report: finestrella senza bordi accanto all'icona, si chiude perdendo il fuoco, si aggiorna ogni 5 s; segue il tema
   chiaro/scuro delle app di Windows; cifre in colonna (Segoe UI ha cifre a larghezza fissa).
 - Impostazioni: le stesse sezioni del Mac (Misura, Avvio, equipe-track, Regole attività, Esclusioni video, Dati) più
-  «Segnali (diagnostica)» per le prove a mano.
+  «Segnali (diagnostica)» per le prove a mano. In «equipe-track» non c'è nessun campo da riempire: stato del
+  collegamento, «Collega questo computer» (o «Collega di nuovo») e «Scollega».
+
+## Collegamento senza codici
+
+1. Senza credenziali l'agente chiede una richiesta (`POST /api/collega/richiesta` con impronta, nome del computer,
+   `windows` e versione) e riceve un codice segreto, che tiene solo in memoria, e un codice pubblico.
+2. Apre il browser predefinito su `{server}/collega/{codice pubblico}`: la persona entra in equipe-track e preme «Collega».
+3. Intanto ritira ogni `intervallo` secondi (`POST /api/collega/ritira`); quando arriva `collegato` salva URL e token in
+   Gestione credenziali e fa partire il sync. La richiesta vale dieci minuti, una volta sola, solo per questo computer.
+
+Stati (`DeviceLinkMachine`, pura): non collegato → richiesta in corso → in attesa (con scadenza) → collegato, oppure
+scaduta, rifiutata (già usata, altro computer, sconosciuta, rifiutata) o errore. Un errore di rete durante l'attesa non
+perde la richiesta: si riprova al giro successivo finché non scade. Nessun esito finale si ritenta da solo: si riparte
+dalla voce di menu. Il browser si apre da solo soltanto al primo avvio senza credenziali (`linkAttempted` in
+`settings.json`); codice segreto e token non finiscono mai nel log.

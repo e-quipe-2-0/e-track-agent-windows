@@ -26,7 +26,7 @@ Istruzioni per chi installa: [installer/LEGGIMI.txt](installer/LEGGIMI.txt) (cop
 | Dominio della scheda del browser | UI Automation (COM, parte di Windows) letta da .NET senza dipendenze | Estensioni del browser: andrebbero installate e mantenute per ogni browser |
 | Credenziali sicure | Gestione credenziali di Windows (`CredWriteW`/`CredReadW`, cifrate con DPAPI sul profilo) | File cifrati a mano |
 | Icona nella tray, report, Impostazioni | WinForms: `NotifyIcon` e controlli nativi, nessun runtime grafico da distribuire | WPF/WinUI: più pesanti per due finestre di servizio |
-| **Logica identica al Mac** | Il Core (motore, regole, report, storage, sync) è C# puro `net10.0`, **verificato su macOS/Linux** con gli stessi casi dei check Swift (273 verifiche, server equipe-track finto incluso) | — |
+| **Logica identica al Mac** | Il Core (motore, regole, report, storage, sync) è C# puro `net10.0`, **verificato su macOS/Linux** con gli stessi casi dei check Swift (397 verifiche, server equipe-track finto incluso) | — |
 | Distribuzione | `dotnet publish` autosufficiente: **un solo .exe** col runtime dentro, niente da preinstallare; installer NSIS per utente, senza amministratore | MSI/WiX: richiede Windows per compilare; .NET Framework 4.8: preinstallato ma API vecchie e niente test sul Mac |
 
 Il prezzo è la dimensione: il runtime .NET e la proiezione WinRT stanno dentro l'eseguibile (~54 MB, installer ~48 MB).
@@ -86,18 +86,30 @@ l'amministratore.
 - `activity.sqlite` — segmenti grezzi, regole, registro delle sessioni, esiti d'invio. **Schema identico al Mac**
   (stesse tabelle, stesse colonne, migrazioni in `grdb_migrations`); su Windows `bundle_id` contiene il nome
   dell'eseguibile (`chrome.exe`). L'attività si calcola al momento del report: una regola modificata vale anche sul passato.
-- `settings.json` — soglia, esclusioni video, primo avvio. Nessun segreto.
-- `agent.log` — avvii, invii (`[Sync] <giorno>: N tratti scritti`), errori. Mai token, segreti, indirizzi o titoli.
+- `settings.json` — soglia, esclusioni video, collegamento già tentato (`linkAttempted`), avvio all'accesso spento
+  dalla persona (`loginItemDisabledByUser`), eventuale GUID di ripiego per l'impronta del computer. Nessun segreto.
+- `agent.log` — avvii, invii (`[Sync] <giorno>: N tratti scritti`), collegamento (`[Collegamento] …`), errori. Mai token,
+  codici del collegamento, segreti, indirizzi o titoli (solo con `AT_NO_BROWSER=1` l'indirizzo da aprire nel browser).
 
 ## equipe-track
 
 Identico al Mac ([docs/EQUIPE-TRACK.md](../activity-tracker/docs/EQUIPE-TRACK.md) dell'agente Mac):
 
-- **Impostazioni → equipe-track**: solo il codice di collegamento (token dell'agente, `npm run agente:token -- "Nome"` in
-  equipe-track); il server `https://equipetrack.e-quipe.com` è incorporato (`SyncClient.DefaultServerUrl`), per i test lo
+- **Collegamento senza codici** (dalla 0.4.0): apri l'agente, si apre il browser, premi «Collega». Al primo avvio senza
+  credenziali l'agente crea una richiesta (`POST /api/collega/richiesta`: impronta del computer, nome, `windows`,
+  versione), apre il browser predefinito su `{server}/collega/{codice}` e ritira ogni 3 secondi
+  (`POST /api/collega/ritira`) finché la persona, entrata in equipe-track, preme «Collega» (o passano dieci minuti).
+  Nessun codice si vede né si copia: il token passa dal server all'agente e va dritto in Gestione credenziali.
+  Negli avvii successivi il browser non si riapre da solo: clic destro sull'icona → **«Collega questo computer»**
+  (la voce c'è quando non si è collegati o quando il server ha rifiutato il token), oppure Impostazioni → equipe-track
+  → «Collega questo computer» / «Collega di nuovo» / «Scollega». Dettagli in [docs/DESIGN.md](docs/DESIGN.md).
+- Il server `https://equipetrack.e-quipe.com` è incorporato (`SyncClient.DefaultServerUrl`), per i test lo
   sostituisce `AT_SERVER_URL`. URL e token in **Gestione credenziali di Windows** (`it.equipe.activitytracker.equipe-track/…`),
   mai su file né nel codice; la vecchia voce `gate-secret` si toglie a ogni salvataggio. `http://` solo per
   `localhost`/`127.0.0.1` e solo con `AT_ALLOW_INSECURE_LOCALHOST=1`.
+- L'impronta del computer è lo SHA-256 (64 cifre esadecimali) del `MachineGuid` di Windows con un prefisso dell'app;
+  se non si legge, di un GUID generato una volta in `settings.json`. La richiesta di collegamento vale solo per il
+  computer che l'ha creata.
 - **Quando**: si traccia solo se `GET /api/agente/sessione` (ogni 60 s, alla ripresa dalla sospensione e allo sblocco)
   dice sessione aperta e non in pausa. In pausa non si traccia. Fuori sessione app, dominio e titolo non arrivano
   nemmeno sul disco locale (il cancello `SessionGate` li toglie prima del database).
@@ -106,8 +118,9 @@ Identico al Mac ([docs/EQUIPE-TRACK.md](../activity-tracker/docs/EQUIPE-TRACK.md
   i quattro stati `attivo`, `passivo`, `senza_utilizzo`, `fuori_sessione`; mai URL, titoli di finestra o eseguibili.
   I nomi passano dal filtro che rifiuta `/ ? @ ://` (lo stesso del server).
 - **Spegnimento, riavvio, disconnessione** (`WM_ENDSESSION`): ultimo invio e `POST /api/agente/stop`.
-- Intestazioni: `Authorization: Bearer <token>`, `X-Agente-Versione: 0.3.0-windows`, nessun cookie: il proxy di perimetro
-  lascia passare l'agente col solo token.
+- Intestazioni delle rotte `/api/agente/*`: `Authorization: Bearer <token>`, `X-Agente-Versione: 0.4.0-windows`,
+  `X-Agente-Permessi: ok` (su Windows non ci sono permessi di sistema da concedere), nessun cookie: il proxy di perimetro
+  lascia passare l'agente col solo token. Le due rotte `/api/collega/*` non portano né token né cookie.
 
 ### Prova del giro vero in locale
 
@@ -116,12 +129,14 @@ Identico al Mac ([docs/EQUIPE-TRACK.md](../activity-tracker/docs/EQUIPE-TRACK.md
 2. Chiudere l'agente installato (icona → Esci), poi in PowerShell:
    ```powershell
    $env:AT_SERVER_URL = "http://localhost:3000"; $env:AT_ALLOW_INSECURE_LOCALHOST = "1"
-   $env:AT_STOP_ON_QUIT = "1"; $env:AT_DB_PATH = "$env:TEMP\at-prova.sqlite"
+   $env:AT_STOP_ON_QUIT = "1"; $env:AT_DB_PATH = "$env:TEMP\at-prova.sqlite"; $env:AT_NO_LOGIN_ITEM = "1"
    & "$env:LOCALAPPDATA\Programs\activity-tracker\activity-tracker.exe"
    ```
-3. Impostazioni → equipe-track: il token come codice di collegamento → «Salva nelle credenziali di Windows» (sotto lo
-   stato compare `http://localhost:3000`). Finita la prova, «Scollega»: altrimenti le credenziali di localhost restano
-   salvate anche senza `AT_SERVER_URL`.
+3. Clic destro sull'icona → «Collega questo computer» (al primo avvio senza credenziali il browser si apre da solo):
+   nel browser entra in equipe-track e premi «Collega». Entro pochi secondi lo stato passa a «Collegato» e nelle
+   Impostazioni, sotto lo stato, compare `http://localhost:3000`. Finita la prova, «Scollega»: altrimenti le
+   credenziali di localhost restano salvate anche senza `AT_SERVER_URL`. Per una prova senza browser:
+   `$env:AT_NO_BROWSER = "1"` e l'indirizzo da aprire si legge in `agent.log`.
    Da qui i passi 5–9 della prova Mac sono identici; i log sono in `%LOCALAPPDATA%\activity-tracker\agent.log`.
 
 ## Variabili d'ambiente (prove)
@@ -132,6 +147,8 @@ Identico al Mac ([docs/EQUIPE-TRACK.md](../activity-tracker/docs/EQUIPE-TRACK.md
 - `AT_SERVER_URL=https://…`: si collega a questo server invece di quello incorporato (solo prove).
 - `AT_ALLOW_INSECURE_LOCALHOST=1`: ammette `http://127.0.0.1` / `http://localhost` (solo prove locali).
 - `AT_STOP_ON_QUIT=1`: anche «Esci» chiude la sessione su equipe-track, come lo spegnimento.
+- `AT_NO_BROWSER=1`: il collegamento non apre il browser e scrive l'indirizzo da aprire in `agent.log`.
+- `AT_DEVICE_ID=<64 cifre esadecimali>`: impronta del computer fissata a mano invece di quella del `MachineGuid`.
 
 ## Il segnale video su Windows (unica differenza di piattaforma)
 

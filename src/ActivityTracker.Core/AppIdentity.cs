@@ -20,7 +20,7 @@ public static class AppIdentity
     /// <summary>Nome del file SQLite dentro la cartella dati.</summary>
     public const string DatabaseFileName = "activity.sqlite";
     /// <summary>Versione dichiarata a equipe-track (<c>X-Agente-Versione</c>): quella del Mac più la piattaforma.</summary>
-    public const string AgentVersion = "0.3.0-windows";
+    public const string AgentVersion = "0.4.0-windows";
 
     /// <summary><c>%LOCALAPPDATA%\activity-tracker</c></summary>
     public static string DataDirectory()

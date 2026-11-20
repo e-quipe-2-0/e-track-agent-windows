@@ -1,10 +1,10 @@
 <Project>
-  <!-- Impostazioni comuni ai tre progetti. La versione è quella dell'agente Mac (0.3.0): stesso contratto. -->
+  <!-- Impostazioni comuni ai tre progetti. La versione è quella dell'agente Mac (0.4.0): stesso contratto. -->
   <PropertyGroup>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
     <Company>E-quipe</Company>
     <Product>e-track agent</Product>
     <Copyright>E-quipe</Copyright>

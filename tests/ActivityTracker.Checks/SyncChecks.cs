@@ -333,7 +333,7 @@ public static class SyncChecks
         Check("nessun cookie: basta il Bearer", !req.Headers.ContainsKey("Cookie"));
         Check("versione dell'agente in X-Agente-Versione", req.Headers.GetValueOrDefault("X-Agente-Versione") == "9.9.9");
         Check("sessione: risposta decodificata", r.Traccia && r.Sessione?.Id == "s1" && r.Sessione?.Giorno == "2024-03-10" && r.Sessione?.InPausa == false);
-        Check("versione predefinita: quella del Mac più la piattaforma", AppIdentity.AgentVersion == "0.3.0-windows");
+        Check("versione predefinita: quella del Mac più la piattaforma", AppIdentity.AgentVersion == "0.4.0-windows");
 
         var invio = new InvioSegmenti("2024-03-10", [new SegmentoInvio("s1", "YouTube", 60, StatoAttivita.Attivo, "2024-03-10T09:00:00.000Z")]);
         transport.Responses.Enqueue(new(200, """{"ok":true,"giorno":"2024-03-10","scritti":1,"rimossi":0}"""));

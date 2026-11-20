@@ -2,7 +2,7 @@
 ;
 ; Si installa per l'utente corrente, senza diritti di amministratore, in %LOCALAPPDATA%\Programs\activity-tracker:
 ; nessun avviso UAC, e l'agente gira come l'utente che misura. Lo compila scripts/build.sh (o build.ps1):
-;   makensis -DVERSION=0.3.0 -DSOURCE_DIR=<cartella col .exe pubblicato> -DOUT_FILE=<dist\e-track-agent-windows-setup.exe> activity-tracker.nsi
+;   makensis -DVERSION=0.4.0 -DSOURCE_DIR=<cartella col .exe pubblicato> -DOUT_FILE=<dist\e-track-agent-windows-setup.exe> activity-tracker.nsi
 ;
 ; Non firmato (come l'app Mac firmata ad-hoc): al primo avvio SmartScreen mostra «Windows ha protetto il PC»,
 ; si supera con «Ulteriori informazioni» → «Esegui comunque» (vedi LEGGIMI.txt).
@@ -12,7 +12,7 @@ SetCompressor /SOLID lzma
 SetCompressorDictSize 64
 
 !ifndef VERSION
-  !define VERSION "0.3.0"
+  !define VERSION "0.4.0"
 !endif
 !ifndef SOURCE_DIR
   !define SOURCE_DIR "..\build\publish"
