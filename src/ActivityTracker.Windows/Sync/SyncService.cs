@@ -124,33 +124,23 @@ public sealed class SyncService
 
     public bool HasToken => _credentials is not null;
 
-    /// <summary>Salva in Gestione credenziali il codice di collegamento, abbinato al server incorporato. Codice vuoto = si
-    /// tiene quello già salvato. Un URL o un token diversi da prima ricominciano da zero (registro ed esiti dimenticati:
-    /// potrebbe essere un'altra persona).</summary>
-    public bool SaveCredentials(string rawToken)
+    /// <summary>Dove si collegano le credenziali nuove (server incorporato o <c>AT_SERVER_URL</c>) e se <c>http://</c>
+    /// su localhost è ammesso: li usa anche il collegamento nel browser.</summary>
+    public string ConnectUrl => _connectUrl;
+    public bool AllowInsecureLocalhost => _allowInsecureLocalhost;
+
+    /// <summary>Salva in Gestione credenziali il token ritirato dal collegamento nel browser, abbinato al server a cui
+    /// ci si è collegati, e fa partire subito il sync. Un URL o un token diversi da prima ricominciano da zero
+    /// (registro ed esiti dimenticati: potrebbe essere un'altra persona). Il token non passa mai dall'interfaccia.</summary>
+    public bool SaveCredentials(string token)
     {
-        var (url, error) = SyncClient.Validate(_connectUrl, _allowInsecureLocalhost);
-        if (url is null)
+        var (updated, error) = EquipeCredentials.ForLink(_connectUrl, token, _allowInsecureLocalhost);
+        if (updated is null)
         {
             LastError = Message(error!);
             Notify();
             return false;
         }
-        var token = rawToken.Trim();
-        var newToken = token.Length == 0 ? _credentials?.Token ?? "" : token;
-        if (newToken.Length == 0)
-        {
-            LastError = "Inserisci il codice di collegamento";
-            Notify();
-            return false;
-        }
-        if (!SyncClient.IsWellFormedToken(newToken))
-        {
-            LastError = "Codice di collegamento non valido: 20–200 caratteri fra lettere, cifre, «-» e «_»";
-            Notify();
-            return false;
-        }
-        var updated = new EquipeCredentials(SyncClient.Text(url), newToken);
         var identityChanged = _credentials?.ServerUrl != updated.ServerUrl || _credentials?.Token != updated.Token;
         try
         {
@@ -203,12 +193,12 @@ public sealed class SyncService
 
     public string StatusText => State switch
     {
-        Link.NotConfigured => "Non configurato: non traccia",
+        Link.NotConfigured => "Non collegato: non traccia",
         Link.Waiting => "In attesa di equipe-track: non traccia",
         Link.Tracking => "Sessione aperta: traccia",
         Link.Paused => "Sessione in pausa: non traccia",
         Link.NoSession => "Nessuna sessione aperta: non traccia",
-        _ => "Codice di collegamento rifiutato: non traccia",
+        _ => "Collegamento rifiutato: non traccia",
     };
 
     public string LastSendText => LastSendAt is { } t ? "Ultimo invio: " + TimeText(t) : "Ultimo invio: mai";
@@ -475,19 +465,7 @@ public sealed class SyncService
 
     private void Notify() => Changed?.Invoke();
 
-    public static string Message(SyncFault e) => e.Kind switch
-    {
-        SyncErrorKind.InsecureUrl => "URL non sicuro: serve https:// (http solo per localhost con AT_ALLOW_INSECURE_LOCALHOST=1)",
-        SyncErrorKind.InvalidUrl => "URL del server non valido",
-        SyncErrorKind.Unauthorized => "Codice di collegamento rifiutato da equipe-track: chiedine uno nuovo e salvalo qui",
-        SyncErrorKind.Gate => "equipe-track ha bloccato la richiesta (401): si riprova al prossimo giro",
-        SyncErrorKind.Forbidden => "Operazione non consentita (403)",
-        SyncErrorKind.BadRequest or SyncErrorKind.Unprocessable => "Richiesta rifiutata dal server: " + e.Detail,
-        SyncErrorKind.RateLimited => "Server occupato (429)",
-        SyncErrorKind.Server => $"Errore del server ({e.Status})",
-        SyncErrorKind.Network => "Rete: " + e.Detail,
-        _ => "Risposta del server non valida",
-    };
+    public static string Message(SyncFault e) => SyncMessages.For(e);
 
     private static readonly CultureInfo Italian = CultureInfo.GetCultureInfo("it-IT");
 

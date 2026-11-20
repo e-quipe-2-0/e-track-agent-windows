@@ -5,9 +5,9 @@ using Timer = System.Windows.Forms.Timer;
 namespace ActivityTracker.Windows.UI;
 
 /// <summary>
-/// Impostazioni, le stesse sezioni del Mac: soglia, avvio all'accesso, collegamento a equipe-track (solo il codice di
-/// collegamento: il server è incorporato; salvati in Gestione credenziali), regole attività, esclusioni video, segnali,
-/// cartella dati. Il codice resta nel campo solo fino al salvataggio, poi il campo si svuota.
+/// Impostazioni, le stesse sezioni del Mac: soglia, avvio all'accesso, collegamento a equipe-track (stato, «Collega
+/// questo computer» e «Scollega»: nessun codice da incollare, il collegamento passa dal browser e il token va da solo
+/// in Gestione credenziali), regole attività, esclusioni video, segnali, cartella dati.
 ///
 /// Impaginazione: sezioni di larghezza fissa una sotto l'altra in un pannello che scorre; dentro ogni sezione una
 /// griglia a una colonna, i campi si allargano per ancoraggio. Misure in pixel logici, scalate con <see cref="S"/>.
@@ -26,8 +26,7 @@ public sealed class SettingsForm : Form
 
     private readonly Label _syncStatus = new() { AutoSize = true, Font = Fonts.BodyStrong, UseMnemonic = false };
     private readonly Label _syncDetail;
-    private readonly TextBox _token = new() { UseSystemPasswordChar = true };
-    private readonly Button _save = new() { Text = "Salva nelle credenziali di Windows", AutoSize = true };
+    private readonly Button _link = new() { Text = TrayApp.LinkMenuText, AutoSize = true };
     private readonly Button _sendNow = new() { Text = "Invia ora", AutoSize = true };
     private readonly Button _disconnect = new() { Text = "Scollega", AutoSize = true };
     private readonly Label _syncError;
@@ -122,35 +121,21 @@ public sealed class SettingsForm : Form
         };
         _disconnect.Click += (_, _) =>
         {
-            if (MessageBox.Show(this, "Togliere il codice di collegamento da questo PC? L'agente smette di tracciare.", Text,
+            if (MessageBox.Show(this, "Scollegare questo PC da equipe-track? L'agente smette di tracciare.", Text,
                                 MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
-            _model.Sync.Disconnect();
+            _model.Disconnect();
             RefreshSync();
         };
-
-        var grid = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Margin = Padding.Empty };
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        void Field(string label, TextBox field)
+        _link.Click += (_, _) =>
         {
-            var r = grid.RowCount++;
-            grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            grid.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Right, Margin = Pad(0, 4, 8, 4) }, 0, r);
-            field.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-            field.Margin = Pad(0, 3, 0, 3);
-            grid.Controls.Add(field, 1, r);
-        }
-        Field("Codice di collegamento", _token);
-        _token.KeyDown += (_, e) =>
-        {
-            if (e.KeyCode == Keys.Enter) Save();
+            _model.ConnectComputer();
+            RefreshSync();
         };
-        _save.Click += (_, _) => Save();
-        _token.TextChanged += (_, _) => UpdateSaveEnabled();
-        _save.Anchor = AnchorStyles.Right;
-        _save.Margin = Pad(0, 6, 0, 0);
+        _link.Margin = Pad(0, 2, 0, 4);
         _syncError.ForeColor = Color.Firebrick;
-        return Section("equipe-track", header, grid, _save, _syncError,
+        return Section("equipe-track", header, _link, _syncError,
+            Caption("Per collegare questo computer si apre il browser: entra in equipe-track e premi «Collega». Non c'è " +
+                    "nessun codice da copiare; il collegamento resta in Gestione credenziali di Windows."),
             Caption("Si traccia solo con una sessione aperta e non in pausa su equipe-track. Escono solo nomi già aggregati " +
                     "(es. «YouTube»), stato e durata: mai indirizzi, titoli di finestra o nomi dei programmi."));
     }
@@ -269,7 +254,6 @@ public sealed class SettingsForm : Form
         if (e.CloseReason == CloseReason.UserClosing)
         {
             e.Cancel = true;
-            _token.Text = "";
             _refresh.Stop();
             Hide();
             return;
@@ -286,7 +270,7 @@ public sealed class SettingsForm : Form
     public void RefreshSync()
     {
         var sync = _model.Sync;
-        _syncStatus.Text = sync.StatusText;
+        _syncStatus.Text = _model.ConnectionStatus;
         _syncStatus.ForeColor = sync.State == SyncService.Link.Tracking ? Color.SeaGreen
             : sync.NeedsAttention ? Color.DarkGoldenrod : SystemColors.ControlText;
         var detail = new List<string>();
@@ -296,20 +280,11 @@ public sealed class SettingsForm : Form
         _sendNow.Visible = sync.HasToken;
         _sendNow.Enabled = !sync.IsBusy;
         _disconnect.Visible = sync.HasToken;
-        _token.PlaceholderText = sync.HasToken ? "salvato in Gestione credenziali (incollane uno nuovo per sostituirlo)" : "fornito da chi gestisce equipe-track";
-        _syncError.Text = sync.LastError ?? "";
-        _syncError.Visible = sync.LastError is not null;
-        UpdateSaveEnabled();
-    }
-
-    private void UpdateSaveEnabled() => _save.Enabled = _token.Text.Trim().Length > 0;
-
-    private void Save()
-    {
-        if (!_save.Enabled) return;
-        _model.Sync.SaveCredentials(_token.Text);
-        _token.Text = "";
-        RefreshSync();
+        _link.Text = sync.HasToken ? "Collega di nuovo" : TrayApp.LinkMenuText;
+        _link.Enabled = _model.Link.Phase != LinkPhase.Requesting;
+        var error = _model.ConnectionError;
+        _syncError.Text = error ?? "";
+        _syncError.Visible = error is not null;
     }
 
     private void LoadRules()

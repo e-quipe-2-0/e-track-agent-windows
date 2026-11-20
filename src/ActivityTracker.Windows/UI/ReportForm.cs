@@ -243,7 +243,7 @@ public sealed class ReportForm : Form
         _status.Text = _model.StatusLine;
         _storage.Text = _model.StorageError ?? "";
         _storage.Visible = _model.StorageError is not null;
-        _sync.Text = _model.Sync.MenuLine;
+        _sync.Text = _model.ConnectionLine;
         _sync.ForeColor = _model.Sync.NeedsAttention ? _palette.Attention
             : _model.Sync.State == SyncService.Link.Tracking ? _palette.Accent : _palette.Mute;
     }

@@ -20,6 +20,8 @@ public sealed class AppModel : ISyncDataSource, IDisposable
     public BrowserUrlReader Browser { get; }
     public VideoSignalReader Video { get; }
     public SyncService Sync { get; }
+    /// <summary>Il collegamento nel browser, senza codici: l'unico modo di dare un token all'agente.</summary>
+    public DeviceLinkService Link { get; }
     public Store? Store { get; private set; }
     public Sampler? Sampler { get; private set; }
 
@@ -44,6 +46,7 @@ public sealed class AppModel : ISyncDataSource, IDisposable
         Browser = new BrowserUrlReader(!AppSettings.SkipBrowserUrl);
         Video = new VideoSignalReader(Settings.VideoExclusions);
         Sync = new SyncService(this, new CredentialManagerStore());
+        Link = new DeviceLinkService(Sync, Settings);
     }
 
     // Ciclo di vita
@@ -68,7 +71,12 @@ public sealed class AppModel : ISyncDataSource, IDisposable
         Monitor.WillPowerOff += powerOff => Shutdown(closeSession: powerOff);
         RegisterLoginItemIfFirstLaunch();
         RefreshReport();
-        if (Store is not null) Sync.Start();
+        if (Store is not null)
+        {
+            Sync.Start();
+            // Senza credenziali, e solo la prima volta: richiesta di collegamento e browser.
+            Link.Start();
+        }
         Log.Write($"[AppModel] avvio, soglia {Settings.ThresholdMinutes} min, dati in {DataFolderPath}");
     }
 
@@ -80,6 +88,7 @@ public sealed class AppModel : ISyncDataSource, IDisposable
     {
         if (_shutdown) return;
         _shutdown = true;
+        Link.Shutdown();
         try { Sampler?.Stop(); } catch (Exception e) { Log.Write("[AppModel] flush finale fallito: " + e.Message); }
         try { Sync.Shutdown(closeSession); } catch (Exception e) { Log.Write("[AppModel] invio finale fallito: " + e.Message); }
     }
@@ -240,6 +249,49 @@ public sealed class AppModel : ISyncDataSource, IDisposable
         {
             RulesError = e.Message;
         }
+    }
+
+    // Collegamento a equipe-track
+
+    /// <summary>La voce «Collega questo computer» serve: non collegato, o token rifiutato dal server.</summary>
+    public bool OffersLink => DeviceLinkPolicy.OffersLink(Sync.HasToken, Sync.State == SyncService.Link.TokenRejected);
+
+    /// <summary>La riga di stato di tray e Impostazioni: il collegamento finché non c'è (o mentre lo si rifà), poi
+    /// «Collegato» con lo stato della sessione.</summary>
+    public string ConnectionStatus
+    {
+        get
+        {
+            if (Link.IsActive || !Sync.HasToken) return Link.StatusText;
+            if (Sync.State == SyncService.Link.TokenRejected) return "Collegamento rifiutato da equipe-track: ricollega dal menu";
+            var s = Sync.StatusText;
+            return "Collegato · " + char.ToLowerInvariant(s[0]) + s[1..];
+        }
+    }
+
+    /// <summary>Riga discreta per la finestra del report.</summary>
+    public string ConnectionLine
+    {
+        get
+        {
+            if (!Link.IsActive && Sync.HasToken) return Sync.MenuLine;
+            var s = Link.StatusText;
+            return "equipe-track: " + char.ToLowerInvariant(s[0]) + s[1..];
+        }
+    }
+
+    /// <summary>L'errore da mostrare sotto lo stato: quello del collegamento se è in corso o è finito male, altrimenti
+    /// quello del sync.</summary>
+    public string? ConnectionError =>
+        Link.Phase is LinkPhase.Waiting or LinkPhase.Rejected or LinkPhase.Failed && Link.Detail is not null ? Link.Detail : Sync.LastError;
+
+    public void ConnectComputer() => Link.Connect();
+
+    /// <summary>«Scollega»: toglie le credenziali, dimentica la richiesta in attesa e smette di tracciare.</summary>
+    public void Disconnect()
+    {
+        Sync.Disconnect();
+        Link.Reset();
     }
 
     // Avvio all'accesso

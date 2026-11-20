@@ -78,11 +78,15 @@ public sealed class HttpClientTransport : IHttpTransport
 ///   POST /api/agente/stop       chiude la sessione aperta
 /// </code>
 /// Ogni richiesta porta <c>Authorization: Bearer &lt;token&gt;</c>: il proxy di perimetro lascia passare l'agente col solo
-/// token. Il token non viene mai scritto nei log.
+/// token. Il token non viene mai scritto nei log. Porta anche <c>X-Agente-Permessi</c>: i permessi di sistema che
+/// all'agente mancano; su Windows non c'è niente da concedere, quindi sempre <c>ok</c>.
 /// </summary>
 public sealed class SyncClient
 {
     public const string VersionHeader = "X-Agente-Versione";
+    public const string PermissionsHeader = "X-Agente-Permessi";
+    /// <summary>Su Windows app in primo piano, inattività e barra degli indirizzi si leggono senza permessi: sempre «ok».</summary>
+    public const string PermissionsValue = "ok";
     public const string InsecureLocalhostFlag = "AT_ALLOW_INSECURE_LOCALHOST";
 
     public Uri BaseUrl { get; }
@@ -100,7 +104,7 @@ public sealed class SyncClient
 
     // Indirizzo del server
 
-    /// <summary>Il server di equipe-track, incorporato: l'utente inserisce solo il codice di collegamento.</summary>
+    /// <summary>Il server di equipe-track, incorporato: l'utente non inserisce niente, il collegamento passa dal browser.</summary>
     public const string DefaultServerUrl = "https://equipetrack.e-quipe.com";
     /// <summary>Variabile d'ambiente che sostituisce <see cref="DefaultServerUrl"/> (solo per i test, es.
     /// <c>http://localhost:3000</c> insieme a <c>AT_ALLOW_INSECURE_LOCALHOST=1</c>).</summary>
@@ -201,6 +205,7 @@ public sealed class SyncClient
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + Token.Trim());
         request.Headers.TryAddWithoutValidation(VersionHeader, AgentVersion);
+        request.Headers.TryAddWithoutValidation(PermissionsHeader, PermissionsValue);
         if (body is not null)
         {
             request.Content = new ByteArrayContent(body);
@@ -262,7 +267,7 @@ public sealed class SyncClient
         catch (Exception) { return null; }
     }
 
-    private static string ServerMessage(byte[] data, string fallback) =>
+    internal static string ServerMessage(byte[] data, string fallback) =>
         TryError(data) is { Errore.Length: > 0 } e ? e.Errore : fallback;
 
     /// <summary>Descrizione breve in italiano di un errore di rete.</summary>
@@ -288,4 +293,22 @@ public sealed class SyncClient
         }
         return error.Message;
     }
+}
+
+/// <summary>Il testo in italiano di un errore verso equipe-track, per l'interfaccia e per il log (mai token né codici).</summary>
+public static class SyncMessages
+{
+    public static string For(SyncFault e) => e.Kind switch
+    {
+        SyncErrorKind.InsecureUrl => "URL non sicuro: serve https:// (http solo per localhost con AT_ALLOW_INSECURE_LOCALHOST=1)",
+        SyncErrorKind.InvalidUrl => "URL del server non valido",
+        SyncErrorKind.Unauthorized => "Collegamento rifiutato da equipe-track: ricollega questo computer dal menu dell'icona («Collega questo computer»)",
+        SyncErrorKind.Gate => "equipe-track ha bloccato la richiesta (401): si riprova al prossimo giro",
+        SyncErrorKind.Forbidden => "Operazione non consentita (403)",
+        SyncErrorKind.BadRequest or SyncErrorKind.Unprocessable => "Richiesta rifiutata dal server: " + e.Detail,
+        SyncErrorKind.RateLimited => "Server occupato (429): riprova fra qualche minuto",
+        SyncErrorKind.Server => $"Errore del server ({e.Status})",
+        SyncErrorKind.Network => "Rete: " + e.Detail,
+        _ => "Risposta del server non valida",
+    };
 }

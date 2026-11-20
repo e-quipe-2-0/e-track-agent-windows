@@ -23,8 +23,9 @@ public sealed class InMemoryTokenStore : ITokenStore
 
 /// <summary>
 /// Le due credenziali dell'agente verso equipe-track, entrambe nel deposito sicuro (mai in file di impostazioni, mai nel
-/// codice): URL del server (quello incorporato, <c>SyncClient.DefaultServerUrl</c>, salvo test) e token dell'agente, il
-/// «codice di collegamento» emesso da <c>npm run agente:token</c>. URL e token vanno in coppia: il token vale per quel server.
+/// codice): URL del server (quello incorporato, <c>SyncClient.DefaultServerUrl</c>, salvo test) e token dell'agente,
+/// ritirato dal collegamento nel browser (<see cref="DeviceLinkFlow"/>): nessuno lo vede né lo copia. URL e token vanno
+/// in coppia: il token vale per quel server.
 /// </summary>
 public sealed record EquipeCredentials(string ServerUrl, string Token)
 {
@@ -34,6 +35,18 @@ public sealed record EquipeCredentials(string ServerUrl, string Token)
         public const string Token = "agent-token";
         /// <summary>Voce delle versioni che mandavano il cookie del gate: non si usa più, si toglie a ogni salvataggio.</summary>
         public const string LegacyGateSecret = "gate-secret";
+    }
+
+    /// <summary>Le credenziali di un collegamento appena riuscito: il token ritirato, abbinato al server a cui ci si è
+    /// collegati (validato come sempre: https, http solo per localhost con il flag). Errore se l'URL non è ammesso o
+    /// se il token non ha la forma che il server accetta.</summary>
+    public static (EquipeCredentials? Credentials, SyncFault? Error) ForLink(string serverUrl, string token, bool allowInsecureLocalhost)
+    {
+        var (url, error) = SyncClient.Validate(serverUrl, allowInsecureLocalhost);
+        if (url is null) return (null, error);
+        var trimmed = token.Trim();
+        if (!SyncClient.IsWellFormedToken(trimmed)) return (null, new SyncFault(SyncErrorKind.Decoding));
+        return (new EquipeCredentials(SyncClient.Text(url), trimmed), null);
     }
 
     /// <summary>null se manca l'URL o il token.</summary>

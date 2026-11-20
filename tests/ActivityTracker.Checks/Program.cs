@@ -5,6 +5,7 @@ using ActivityTracker.Checks;
 
 CoreChecks.Run();
 SyncChecks.Run();
+LinkChecks.Run();
 FakeEquipeTrack.RunChecks();
 
 Console.WriteLine($"\n{H.Passes} verifiche superate, {H.Failures} fallite");

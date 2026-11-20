@@ -33,6 +33,8 @@ public sealed class AppSettings
         [JsonPropertyName("thresholdMinutes")] public int? ThresholdMinutes { get; set; }
         [JsonPropertyName("videoExclusions")] public List<string>? VideoExclusions { get; set; }
         [JsonPropertyName("loginItemAttempted")] public bool LoginItemAttempted { get; set; }
+        [JsonPropertyName("linkAttempted")] public bool LinkAttempted { get; set; }
+        [JsonPropertyName("deviceGuid")] public string? DeviceGuid { get; set; }
     }
 
     private readonly string _path;
@@ -83,6 +85,31 @@ public sealed class AppSettings
         }
     }
 
+    /// <summary>Il browser del collegamento si è già aperto una volta: negli avvii successivi senza credenziali non
+    /// si riapre da solo, resta la voce di menu «Collega questo computer».</summary>
+    public bool LinkAttempted
+    {
+        get => _data.LinkAttempted;
+        set
+        {
+            if (_data.LinkAttempted == value) return;
+            _data.LinkAttempted = value;
+            Save();
+        }
+    }
+
+    /// <summary>Ripiego per l'impronta del computer quando il <c>MachineGuid</c> di Windows non si legge: un GUID
+    /// generato una volta e conservato qui. Non è un segreto.</summary>
+    public string DeviceGuid()
+    {
+        if (string.IsNullOrWhiteSpace(_data.DeviceGuid))
+        {
+            _data.DeviceGuid = Guid.NewGuid().ToString("D");
+            Save();
+        }
+        return _data.DeviceGuid!;
+    }
+
     private void Save()
     {
         try
@@ -100,10 +127,14 @@ public sealed class AppSettings
 
     /// <summary><c>AT_NO_LOGIN_ITEM=1</c>: non registra l'avvio all'accesso al primo avvio.</summary>
     public static bool SkipLoginItem => Flag("AT_NO_LOGIN_ITEM");
+    /// <summary><c>AT_DEVICE_ID=&lt;64 esadecimali&gt;</c>: impronta del computer fissata a mano (prove).</summary>
+    public static string? DeviceIdOverride => Environment.GetEnvironmentVariable(DeviceIdentity.Variable);
     /// <summary><c>AT_NO_BROWSER_URL=1</c>: non legge la barra degli indirizzi (l'equivalente di <c>AT_NO_APPLE_EVENTS</c>).</summary>
     public static bool SkipBrowserUrl => Flag("AT_NO_BROWSER_URL") || Flag("AT_NO_APPLE_EVENTS");
     /// <summary><c>AT_STOP_ON_QUIT=1</c>: anche «Esci» chiude la sessione su equipe-track, come lo spegnimento.</summary>
     public static bool StopOnQuit => Flag("AT_STOP_ON_QUIT");
+    /// <summary><c>AT_NO_BROWSER=1</c>: il collegamento non apre il browser e scrive l'indirizzo nel log (prove).</summary>
+    public static bool NoBrowser => Flag("AT_NO_BROWSER");
     /// <summary><c>AT_DB_PATH=C:\percorso\file.sqlite</c>: database alternativo.</summary>
     public static string? DatabasePathOverride => Environment.GetEnvironmentVariable("AT_DB_PATH") is { Length: > 0 } p ? p : null;
 
@@ -114,7 +145,8 @@ public sealed class AppSettings
     }
 }
 
-/// <summary>Registro minimo su file (<c>%LOCALAPPDATA%\activity-tracker\agent.log</c>), mai segreti né indirizzi.</summary>
+/// <summary>Registro minimo su file (<c>%LOCALAPPDATA%\activity-tracker\agent.log</c>), mai segreti né indirizzi
+/// (sola eccezione, per le prove: con <c>AT_NO_BROWSER=1</c> l'indirizzo del collegamento, che non contiene segreti).</summary>
 public static class Log
 {
     private static readonly object Lock = new();

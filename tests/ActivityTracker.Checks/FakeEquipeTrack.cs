@@ -14,6 +14,10 @@ namespace ActivityTracker.Checks;
 // il proxy di perimetro lascia passare l'agente) e le tre rotte dell'agente, con le regole del contratto riscritte qui in
 // piccolo da `src/lib/domain/agente.ts` e `src/app/api/agente/*/route.ts`. L'agente ci parla con il suo client
 // vero (HttpClient, intestazioni, JSON): se il giro passa qui, il giro vero cambia solo l'indirizzo.
+//
+// Più le due rotte del collegamento senza codici (`/api/collega/richiesta` e `/api/collega/ritira`, senza token), con
+// le regole di `src/lib/domain/collegamento.ts`: monouso, a scadenza, legata al computer che l'ha creata. La parte
+// della persona («Collega» nel browser) la fanno le verifiche con `ApprovaCollegamento`.
 
 /// <summary>Il server finto. Lo stato si legge e si cambia dal thread delle verifiche; le richieste arrivano su un altro.</summary>
 public sealed class FakeEquipeTrack : IDisposable
@@ -29,6 +33,21 @@ public sealed class FakeEquipeTrack : IDisposable
 
     public sealed record Richiesta(string Metodo, string Percorso, Dictionary<string, string> Intestazioni, byte[] Corpo);
 
+    /// <summary>Una richiesta di collegamento, come la riga che il server tiene per dieci minuti.</summary>
+    public sealed class Collegamento
+    {
+        public required string CodiceDispositivo;
+        public required string CodiceUtente;
+        public required string DispositivoId;
+        public required string Nome;
+        public required string Sistema;
+        public string? Versione;
+        public required DateTimeOffset ScadeAt;
+        public bool Approvata;
+        public bool Ritirata;
+        public bool Rifiutata;
+    }
+
     private const double Tolleranza = 120;
     private const double Sovrapposizione = 2;
 
@@ -41,6 +60,12 @@ public sealed class FakeEquipeTrack : IDisposable
     private readonly List<Sessione> _sessioni = [];
     private readonly Dictionary<string, List<JsonObject>> _giornate = [];
     private readonly List<Richiesta> _richieste = [];
+    private readonly List<Collegamento> _collegamenti = [];
+
+    /// <summary>Con true <c>POST /api/collega/richiesta</c> risponde 429 (troppe richieste).</summary>
+    public bool TroppeRichieste;
+    public int ScadeTra = 600;
+    public int Intervallo = 3;
 
     public FakeEquipeTrack(string token)
     {
@@ -101,6 +126,42 @@ public sealed class FakeEquipeTrack : IDisposable
     public List<Richiesta> RichiesteRicevute()
     {
         lock (_lock) return _richieste.ToList();
+    }
+
+    public List<Collegamento> Collegamenti()
+    {
+        lock (_lock) return _collegamenti.ToList();
+    }
+
+    /// <summary>La persona, entrata in equipe-track, preme «Collega» sulla pagina <c>/collega/&lt;codice_utente&gt;</c>.</summary>
+    public bool ApprovaCollegamento(string codiceUtente)
+    {
+        lock (_lock)
+        {
+            var c = _collegamenti.FirstOrDefault(x => x.CodiceUtente == codiceUtente);
+            if (c is null || c.Ritirata || c.Rifiutata || DateTimeOffset.UtcNow >= c.ScadeAt) return false;
+            c.Approvata = true;
+            return true;
+        }
+    }
+
+    /// <summary>I dieci minuti sono passati.</summary>
+    public void ScadiCollegamento(string codiceUtente)
+    {
+        lock (_lock)
+        {
+            var c = _collegamenti.FirstOrDefault(x => x.CodiceUtente == codiceUtente);
+            if (c is not null) c.ScadeAt = DateTimeOffset.UtcNow.AddSeconds(-1);
+        }
+    }
+
+    public void RifiutaCollegamento(string codiceUtente)
+    {
+        lock (_lock)
+        {
+            var c = _collegamenti.FirstOrDefault(x => x.CodiceUtente == codiceUtente);
+            if (c is not null) c.Rifiutata = true;
+        }
     }
 
     // HTTP
@@ -175,6 +236,10 @@ public sealed class FakeEquipeTrack : IDisposable
         {
             _richieste.Add(r);
 
+            // Il collegamento: senza token, chi chiama non ha ancora niente.
+            if (r.Metodo == "POST" && r.Percorso == DeviceLinkClient.RequestPath) return GestisciRichiesta(r);
+            if (r.Metodo == "POST" && r.Percorso == DeviceLinkClient.PickupPath) return GestisciRitiro(r);
+
             // Il token: stessa risposta per assente, sbagliato o revocato.
             var auth = r.Intestazioni.GetValueOrDefault("authorization", "");
             var given = auth.StartsWith("Bearer ", StringComparison.Ordinal) ? auth[7..].Trim() : "";
@@ -226,6 +291,59 @@ public sealed class FakeEquipeTrack : IDisposable
                     return Response(404, new { ok = false, errore = "rotta sconosciuta" });
             }
         }
+    }
+
+    // Il collegamento (leggiRichiesta, leggiRitiro ed esitoRitiro, in piccolo)
+
+    private static readonly System.Text.RegularExpressions.Regex Impronta = new("^[0-9a-f]{64}$");
+    private static readonly System.Text.RegularExpressions.Regex CodiceSegreto = new(@"^[\w-]{40,64}$");
+
+    private static string Casuale(int bytes) =>
+        Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(bytes)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+    private static string? Testo(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+
+    private byte[] GestisciRichiesta(Richiesta r)
+    {
+        JsonObject? corpo;
+        try { corpo = JsonNode.Parse(r.Corpo) as JsonObject; } catch (Exception) { corpo = null; }
+        if (corpo is null) return Response(400, new { ok = false, errore = "corpo non valido" });
+        if (corpo["dispositivo"] is not JsonObject d) return Response(400, new { ok = false, errore = "dispositivo mancante" });
+        if (Testo(d["id"]) is not { } id || !Impronta.IsMatch(id)) return Response(400, new { ok = false, errore = "dispositivo.id: servono 64 cifre esadecimali" });
+        if (Testo(d["sistema"]) is not ("mac" or "windows") || Testo(d["sistema"]) is not { } sistema)
+            return Response(400, new { ok = false, errore = "dispositivo.sistema: mac o windows" });
+        if (TroppeRichieste)
+            return Response(429, new { ok = false, errore = "troppe richieste: riprova fra qualche minuto" }, headers: new() { ["Retry-After"] = "60" });
+        var nuovo = new Collegamento
+        {
+            CodiceDispositivo = Casuale(32),
+            CodiceUtente = Casuale(16),
+            DispositivoId = id,
+            Nome = Testo(d["nome"]) ?? "",
+            Sistema = sistema,
+            Versione = Testo(corpo["versione"]),
+            ScadeAt = DateTimeOffset.UtcNow.AddSeconds(ScadeTra),
+        };
+        _collegamenti.Add(nuovo);
+        return Response(201, new { ok = true, codice_dispositivo = nuovo.CodiceDispositivo, codice_utente = nuovo.CodiceUtente, scade_tra = ScadeTra, intervallo = Intervallo });
+    }
+
+    private byte[] GestisciRitiro(Richiesta r)
+    {
+        JsonObject? corpo;
+        try { corpo = JsonNode.Parse(r.Corpo) as JsonObject; } catch (Exception) { corpo = null; }
+        if (corpo is null) return Response(400, new { ok = false, errore = "corpo non valido" });
+        if (Testo(corpo["codice_dispositivo"]) is not { } codice || !CodiceSegreto.IsMatch(codice)) return Response(400, new { ok = false, errore = "codice_dispositivo non valido" });
+        if (Testo(corpo["dispositivo_id"]) is not { } id || !Impronta.IsMatch(id)) return Response(400, new { ok = false, errore = "dispositivo_id non valido" });
+        var c = _collegamenti.FirstOrDefault(x => x.CodiceDispositivo == codice);
+        if (c is null) return Response(404, new { ok = false, stato = "sconosciuta" });
+        if (c.DispositivoId != id) return Response(403, new { ok = false, stato = "altro_computer" });
+        if (c.Ritirata) return Response(410, new { ok = false, stato = "usata" });
+        if (c.Rifiutata) return Response(410, new { ok = false, stato = "rifiutata" });
+        if (DateTimeOffset.UtcNow >= c.ScadeAt) return Response(410, new { ok = false, stato = "scaduta" });
+        if (!c.Approvata) return Response(200, new { ok = true, stato = "in_attesa" });
+        c.Ritirata = true;
+        return Response(200, new { ok = true, stato = "collegato", token = Token });
     }
 
     // Le regole dell'invio (leggiInvio + verificaControSessioni, in piccolo)

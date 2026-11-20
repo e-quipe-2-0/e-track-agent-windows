@@ -6,7 +6,8 @@ namespace ActivityTracker.Windows.UI;
 
 /// <summary>
 /// L'app vive come icona nella tray di Windows, senza finestra principale (l'equivalente di LSUIElement sul Mac).
-/// Clic sinistro: report del giorno. Clic destro: menu con report, Impostazioni, Invia ora, Esci.
+/// Clic sinistro: report del giorno. Clic destro: menu con la riga di stato del collegamento, report, «Collega questo
+/// computer» (solo se non collegato o se il server ha rifiutato il token), Impostazioni, Invia ora, Esci.
 /// L'icona dice a colpo d'occhio se si sta tracciando (barre verdi) o no (barre grigie).
 /// </summary>
 public sealed class TrayApp : ApplicationContext
@@ -23,6 +24,7 @@ public sealed class TrayApp : ApplicationContext
     private readonly Icon _iconIdle;
     private bool _exiting;
     private DateTime _trayMouseDownAt;
+    private LinkPhase _lastLinkPhase;
 
     public TrayApp(bool autostart, EventWaitHandle showRequests, EventWaitHandle quitRequests)
     {
@@ -36,12 +38,22 @@ public sealed class TrayApp : ApplicationContext
         _settings = new SettingsForm(_model);
 
         var menu = new ContextMenuStrip();
+        // La riga di stato: «In attesa del collegamento nel browser…», «Collegato · …», «Collegamento scaduto: riprova dal menu».
+        var status = menu.Items.Add(_model.ConnectionStatus);
+        status.Enabled = false;
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Mostra il report di oggi", null, (_, _) => _report.ShowNearTray());
+        var link = menu.Items.Add(LinkMenuText, null, (_, _) => _model.ConnectComputer());
         menu.Items.Add("Impostazioni…", null, (_, _) => OpenSettings());
         var sendNow = menu.Items.Add("Invia ora a equipe-track", null, (_, _) => _model.Sync.SendNow());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Esci", null, (_, _) => Quit());
-        menu.Opening += (_, _) => sendNow.Enabled = _model.Sync.HasToken;
+        menu.Opening += (_, _) =>
+        {
+            status.Text = _model.ConnectionStatus;
+            link.Visible = _model.OffersLink;
+            sendNow.Enabled = _model.Sync.HasToken;
+        };
 
         _tray.ContextMenuStrip = menu;
         _tray.MouseDown += (_, e) =>
@@ -59,6 +71,8 @@ public sealed class TrayApp : ApplicationContext
         _tray.Visible = true;
 
         _model.Sync.Changed += () => _ui.Post(_ => UpdateTray(), null);
+        _lastLinkPhase = _model.Link.Phase;
+        _model.Link.Changed += () => _ui.Post(_ => LinkChanged(), null);
         _status.Tick += (_, _) =>
         {
             _model.Sync.Refresh();
@@ -74,16 +88,37 @@ public sealed class TrayApp : ApplicationContext
         _quitRegistration = ThreadPool.RegisterWaitForSingleObject(quitRequests,
             (_, _) => _ui.Post(_ => Quit(), null), null, Timeout.Infinite, executeOnlyOnce: true);
 
-        // Primo avvio a mano senza collegamento: si aprono le Impostazioni, come farebbe il Mac al primo uso.
-        if (!autostart && !_model.Sync.HasToken)
-        {
-            _ui.Post(_ => OpenSettings(), null);
-        }
-        else if (!_model.Sync.HasToken)
+        // Senza collegamento: al primo avvio il browser si è appena aperto da solo (AppModel.Start); negli avvii
+        // successivi non si riapre, e un avviso ricorda la voce di menu.
+        if (!_model.Sync.HasToken && !_model.Link.IsActive)
         {
             _tray.ShowBalloonTip(8000, AppIdentity.DisplayName,
-                "Non collegato a equipe-track: apri le Impostazioni dall'icona per inserire il codice di collegamento.", ToolTipIcon.Info);
+                $"Non collegato a equipe-track: clic destro sull'icona → «{LinkMenuText}».", ToolTipIcon.Info);
         }
+    }
+
+    public const string LinkMenuText = "Collega questo computer";
+
+    /// <summary>Il collegamento è cambiato: icona e finestre, più un avviso quando riesce, scade o non riesce (la
+    /// persona in quel momento sta guardando il browser, non la tray).</summary>
+    private void LinkChanged()
+    {
+        if (_exiting) return;
+        var phase = _model.Link.Phase;
+        if (phase != _lastLinkPhase)
+        {
+            _lastLinkPhase = phase;
+            var message = phase switch
+            {
+                LinkPhase.Linked => "Computer collegato a equipe-track.",
+                LinkPhase.Expired or LinkPhase.Rejected or LinkPhase.Failed =>
+                    _model.Link.StatusText + (_model.Link.Detail is { } d ? $" ({d})" : ""),
+                _ => null,
+            };
+            if (message is not null)
+                _tray.ShowBalloonTip(8000, AppIdentity.DisplayName, message, phase == LinkPhase.Linked ? ToolTipIcon.Info : ToolTipIcon.Warning);
+        }
+        UpdateTray();
     }
 
     /// <summary>Angolo dell'area di lavoro dove sta di solito la tray (in basso a destra), per aperture non da clic.</summary>
@@ -98,7 +133,7 @@ public sealed class TrayApp : ApplicationContext
         if (_exiting) return;
         var sync = _model.Sync;
         _tray.Icon = sync.State == SyncService.Link.Tracking ? _iconTracking : _iconIdle;
-        var text = $"{AppIdentity.DisplayName} · {sync.StatusText}";
+        var text = $"{AppIdentity.DisplayName} · {_model.ConnectionStatus}";
         _tray.Text = text.Length > 127 ? text[..127] : text;
         if (_settings.Visible) _settings.RefreshSync();
     }
